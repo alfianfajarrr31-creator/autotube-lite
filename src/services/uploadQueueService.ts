@@ -1,0 +1,98 @@
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { UploadQueueItem } from '../types';
+
+export async function getUploadQueue(): Promise<UploadQueueItem[]> {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error('Supabase is not configured.');
+  }
+
+  const { data, error } = await supabase
+    .from('upload_queue')
+    .select('*')
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching upload queue:', error);
+    throw new Error(`Failed to fetch upload queue: ${error.message}`);
+  }
+
+  return (data as UploadQueueItem[]) || [];
+}
+
+export async function addUploadQueueItem(
+  payload: Omit<UploadQueueItem, 'created_at' | 'updated_at'>
+): Promise<UploadQueueItem> {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error('Supabase is not configured.');
+  }
+
+  const { data, error } = await supabase
+    .from('upload_queue')
+    .insert([payload])
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error adding upload queue item:', error);
+    throw new Error(`Failed to add item to queue: ${error.message}`);
+  }
+
+  return data as UploadQueueItem;
+}
+
+export async function deleteUploadQueueItem(id: string): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error('Supabase is not configured.');
+  }
+
+  const { error } = await supabase
+    .from('upload_queue')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    console.error('Error deleting upload queue item:', error);
+    throw new Error(`Failed to delete item from queue: ${error.message}`);
+  }
+}
+
+export async function updateUploadQueueStatus(
+  id: string,
+  status: 'Draft' | 'Scheduled' | 'Uploaded' | 'Failed'
+): Promise<UploadQueueItem> {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error('Supabase is not configured.');
+  }
+
+  const { data, error } = await supabase
+    .from('upload_queue')
+    .update({ 
+      status,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error updating upload queue status:', error);
+    throw new Error(`Failed to update item status: ${error.message}`);
+  }
+
+  return data as UploadQueueItem;
+}
+export async function clearUploadQueue(): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error('Supabase is not configured.');
+  }
+
+  const { error } = await supabase
+    .from('upload_queue')
+    .delete()
+    .neq('id', ''); // Delete all keys since ID is not empty
+
+  if (error) {
+    console.error('Error clearing upload queue:', error);
+    throw new Error(`Failed to clear upload queue: ${error.message}`);
+  }
+}

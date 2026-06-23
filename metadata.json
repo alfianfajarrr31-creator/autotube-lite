@@ -1,0 +1,6 @@
+{
+  "name": "AutoTube Lite",
+  "description": "A lightweight YouTube Shorts upload and scheduling dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
