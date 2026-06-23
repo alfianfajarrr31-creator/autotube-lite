@@ -50,13 +50,26 @@ import {
   updateUploadQueueStatus,
   clearUploadQueue
 } from './services/uploadQueueService';
+import {
+  loadGoogleScripts,
+  ensurePickerLoaded,
+  requestDriveAccessToken,
+  openGooglePicker
+} from './services/googleDrivePickerService';
 
 export default function App() {
   // State for Video Bank
-  const [videos, setVideos] = useState<Video[]>(INITIAL_VIDEOS);
+  const [videos, setVideos] = useState<Video[]>(() => 
+    INITIAL_VIDEOS.map(v => ({ ...v, source: 'mock' as const }))
+  );
   
   // State for Queue
   const [queue, setQueue] = useState<QueueItem[]>([]);
+
+  // State for Google Drive
+  const [gDriveStatus, setGDriveStatus] = useState<'Google Drive Not Connected' | 'Google Drive Connected' | 'Google Drive Error'>('Google Drive Not Connected');
+  const [gDriveError, setGDriveError] = useState<string | null>(null);
+  const [gDriveToken, setGDriveToken] = useState<string | null>(null);
 
   // Supabase Database Connection/Load State
   const [dbLoading, setDbLoading] = useState(isSupabaseConfigured);
@@ -152,7 +165,7 @@ export default function App() {
       setYtHashtags('#shorts #timelapse #construction');
     }
     
-    setYtCoverGradient(video.thumbnailGradient);
+    setYtCoverGradient(video.thumbnailGradient || 'bg-gradient-to-br from-indigo-950 via-slate-900 to-blue-950');
     setYtVisibility('Public');
     
     // Set scheduled date to tomorrow
@@ -186,6 +199,78 @@ export default function App() {
   }, [videos, queue]);
 
   // Handlers
+  const handlePickFromGoogleDrive = async () => {
+    setGDriveError(null);
+    try {
+      showNotification('Accessing Google authentication...', 'info');
+      await loadGoogleScripts();
+      await ensurePickerLoaded();
+
+      const token = await requestDriveAccessToken();
+      setGDriveToken(token);
+      setGDriveStatus('Google Drive Connected');
+
+      const selectedFiles = await openGooglePicker(token);
+      if (!selectedFiles || selectedFiles.length === 0) {
+        return;
+      }
+
+      let addedCount = 0;
+      let duplicateCount = 0;
+      const newDriveVideos: Video[] = [];
+
+      selectedFiles.forEach((file) => {
+        const isDuplicate = videos.some(v => v.source === 'drive' && v.driveFileId === file.driveFileId);
+        if (isDuplicate) {
+          duplicateCount++;
+          return;
+        }
+
+        let formattedSize = 'Unknown size';
+        if (file.sizeBytes) {
+          const mb = Number(file.sizeBytes) / (1024 * 1024);
+          formattedSize = mb >= 1.0 ? `${mb.toFixed(1)} MB` : `${(mb * 1024).toFixed(0)} KB`;
+        }
+
+        const driveVideoItem: Video = {
+          id: `drive-${file.driveFileId}`,
+          driveFileId: file.driveFileId,
+          title: file.name,
+          fileName: file.name,
+          duration: '0:30',
+          status: 'Draft',
+          size: formattedSize,
+          resolution: '1080p (Drive)',
+          thumbnailGradient: 'bg-gradient-to-br from-[#1e293b] via-[#0f172a] to-[#020617]',
+          source: 'drive',
+          mimeType: file.mimeType,
+          url: file.url,
+          thumbnailUrl: file.thumbnailUrl,
+          sizeBytes: file.sizeBytes
+        };
+        newDriveVideos.push(driveVideoItem);
+        addedCount++;
+      });
+
+      if (addedCount > 0) {
+        setVideos(prev => [...prev, ...newDriveVideos]);
+        showNotification(`Successfully imported ${addedCount} videos from Google Drive!`, 'success');
+        
+        const firstAdded = newDriveVideos[0];
+        setSelectedVideoId(firstAdded.id);
+        handleSelectVideo(firstAdded);
+      } else if (duplicateCount > 0) {
+        showNotification('The chosen Google Drive video is already in your Video Bank.', 'info');
+      }
+    } catch (err: any) {
+      console.error("Google Picker Error: ", err);
+      setGDriveStatus('Google Drive Error');
+      const errorMsg = err.message || 'Failed connecting to Google Drive.';
+      setGDriveError(errorMsg);
+      showNotification(errorMsg, 'error');
+    }
+  };
+
   const handleAddHashtag = (hashtag: string) => {
     if (!ytHashtags.includes(hashtag)) {
       setYtHashtags(prev => {
@@ -565,6 +650,39 @@ export default function App() {
                 </button>
               </div>
 
+              {/* GOOGLE DRIVE INTEGRATION CONTROL CARD */}
+              <div className="bg-white/[0.03] hover:bg-white/[0.05] border border-white/10 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 transition duration-200">
+                <div className="flex items-center gap-3 w-full sm:w-auto">
+                  <div className="relative">
+                    <div className={`w-3 h-3 rounded-full ${
+                      gDriveStatus === 'Google Drive Connected' 
+                        ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' 
+                        : gDriveStatus === 'Google Drive Error' 
+                          ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]' 
+                          : 'bg-slate-400'
+                    }`} />
+                  </div>
+                  <div className="flex flex-col text-left">
+                    <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Google Integration</span>
+                    <span className="text-xs font-semibold text-white">{gDriveStatus}</span>
+                    {gDriveError && (
+                      <span className="text-[10px] text-rose-400 font-mono mt-0.5 leading-tight max-w-[320px] line-clamp-2" title={gDriveError}>
+                        ❌ {gDriveError}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handlePickFromGoogleDrive}
+                  className="w-full sm:w-auto px-4 py-2.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-bold rounded-xl text-xs transition transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-blue-950/30 shrink-0"
+                >
+                  <Globe className="w-4 h-4 shrink-0 text-white" />
+                  <span>Pick Videos from Google Drive</span>
+                </button>
+              </div>
+
               {/* MOCK VIDEO INTAKE POPUP / EXPANDED FORM */}
               {isAddMockOpen && (
                 <form onSubmit={handleCreateMockVideo} className="bg-black/30 backdrop-blur-md border border-white/10 p-4 rounded-2xl flex flex-col gap-3 animate-fadeIn">
@@ -682,8 +800,13 @@ export default function App() {
                         {/* Title and stats layout */}
                         <div>
                           <div className="flex items-start justify-between gap-1.5 mb-1">
-                            <span className="text-xs font-semibold text-white line-clamp-2">
-                              {video.title}
+                            <span className="text-xs font-semibold text-white line-clamp-2 flex flex-col gap-1 text-left">
+                              {video.source === 'drive' && (
+                                <span className="inline-flex items-center gap-1 text-[9px] w-fit bg-blue-500/10 text-blue-300 border border-blue-500/20 px-1.5 py-0.5 rounded font-mono font-bold uppercase tracking-wider mb-1 leading-none shadow-sm shadow-blue-950/20">
+                                  🌐 Drive Video
+                                </span>
+                              )}
+                              <span>{video.title}</span>
                             </span>
                             <span className="text-[10px] bg-white/10 text-slate-300 font-mono px-1.5 py-0.5 rounded shrink-0">
                               {video.duration}

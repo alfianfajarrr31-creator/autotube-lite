@@ -7,6 +7,26 @@ export interface Video {
   size: string;
   resolution: string;
   thumbnailGradient: string;
+  source?: 'mock' | 'drive';
+  driveFileId?: string;
+  mimeType?: string;
+  url?: string;
+  thumbnailUrl?: string;
+  sizeBytes?: number;
+}
+
+export interface DriveVideoFile {
+  id: string;
+  driveFileId: string;
+  title: string;
+  fileName: string;
+  duration?: string;
+  mimeType?: string;
+  url?: string;
+  thumbnailUrl?: string;
+  sizeBytes?: number;
+  status: 'Draft' | 'Scheduled' | 'Uploaded' | 'Failed';
+  source: 'drive';
 }
 
 export interface QueueItem {
