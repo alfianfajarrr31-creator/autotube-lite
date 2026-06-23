@@ -1,8 +1,8 @@
-# AutoTube Lite (ARC 2 — Supabase Edition)
+# AutoTube Lite ARC 3.1 — Google Drive Script Loader Fix
 
 AutoTube Lite is a lightweight YouTube Shorts upload and scheduling dashboard. 
 
-With **ARC 2**, AutoTube Lite integrates directly with **Supabase Database** to persist scheduled upload items so they are preserved across page refreshes.
+With **ARC 3.1**, dynamic loading of Google Client Libraries has been completely revamped to ensure seamless, reliable initialization on production hosting platforms like Vercel. 
 
 ---
 
@@ -130,3 +130,25 @@ Formulate checks for code diagnostics, type definitions, and structural safety:
 ```bash
 npm run lint
 ```
+
+---
+
+## 🔍 Google Drive Troubleshooting (Vercel & Production)
+
+If you encounter the message *"Google services could not be loaded. Please try hard refresh, disable ad-blocker for this site, or open in Chrome Incognito."* or issues opening the Google Picker, review these troubleshooting steps:
+
+1. **Add Vercel Domain to Google OAuth Authorized JavaScript Origins**
+   - Head over to the [Google Cloud Console Credentials Screen](https://console.cloud.google.com/apis/credentials).
+   - Under **OAuth 2.0 Client IDs**, edit your Web application Client ID.
+   - In **Authorized JavaScript origins**, make sure to add both your local URLs and **all Vercel production and preview domains** (e.g., `https://your-app-name.vercel.app`).
+
+2. **Add Vercel Domain to API Key Website Restrictions**
+   - Go back to the Credentials Screen and click on your **API Key**.
+   - If you restrict your API Key to specific HTTP referrers, verify that your **Vercel domains are allowed** (e.g., `https://your-app-name.vercel.app/*`). If not restricted, make sure you configure restraints properly to limit public exploitation.
+
+3. **Redeploy After Changing Vercel Environment Variables**
+   - Vercel loads environment variables at build-time. Any changes to `VITE_GOOGLE_CLIENT_ID`, `VITE_GOOGLE_API_KEY`, or `VITE_GOOGLE_APP_ID` require you to **rebuild and redeploy** the application on Vercel to take effect.
+
+4. **Try Chrome Incognito If Google Scripts Are Blocked**
+   - Content blockers, ad blockers, or strict Brave shields can sometimes block standard client scripts from Google (`gsi/client` or `api.js`). Opening the site in a clean Chrome Incognito tab allows you to check if extensions are causing blockages.
+

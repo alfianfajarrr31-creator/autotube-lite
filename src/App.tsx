@@ -54,7 +54,8 @@ import {
   loadGoogleScripts,
   ensurePickerLoaded,
   requestDriveAccessToken,
-  openGooglePicker
+  openGooglePicker,
+  checkGoogleConfigured
 } from './services/googleDrivePickerService';
 
 export default function App() {
@@ -67,9 +68,21 @@ export default function App() {
   const [queue, setQueue] = useState<QueueItem[]>([]);
 
   // State for Google Drive
-  const [gDriveStatus, setGDriveStatus] = useState<'Google Drive Not Connected' | 'Google Drive Connected' | 'Google Drive Error'>('Google Drive Not Connected');
-  const [gDriveError, setGDriveError] = useState<string | null>(null);
+  const [gDriveStatus, setGDriveStatus] = useState<'Google Drive Not Connected' | 'Google Drive Connected' | 'Google Drive Error'>(() => {
+    return checkGoogleConfigured() ? 'Google Drive Not Connected' : 'Google Drive Error';
+  });
+  const [gDriveError, setGDriveError] = useState<string | null>(() => {
+    return checkGoogleConfigured() ? null : 'Google Drive is not configured yet.';
+  });
   const [gDriveToken, setGDriveToken] = useState<string | null>(null);
+
+  // Initial check on mount
+  useEffect(() => {
+    if (!checkGoogleConfigured()) {
+      setGDriveStatus('Google Drive Error');
+      setGDriveError('Google Drive is not configured yet.');
+    }
+  }, []);
 
   // Supabase Database Connection/Load State
   const [dbLoading, setDbLoading] = useState(isSupabaseConfigured);
