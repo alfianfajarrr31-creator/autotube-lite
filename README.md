@@ -58,6 +58,15 @@ To establish a functioning Google Picker inside the app, complete the following 
 
 ## 💾 Supabase Database Table Configuration
 
+AutoTube Lite ARC 3.2 utilizes two tables inside Supabase for persistent, offline-first operations:
+
+1. **`upload_queue`**: Stores scheduled video publishing metadata (titles, descriptions, scheduled times, publishing visibility status).
+2. **`drive_videos`**: Stores the metadata of selected or picked Google Drive video assets so that they remain available inside your local Video Bank even after refresh.
+
+> ⚠️ **Note on Deletion**: Selecting "Remove from Bank" removes the video metadata from the `drive_videos` database table. It **never** deletes or alters the actual file inside Google Drive.
+
+### 1. Create `upload_queue` Table
+
 Execute the following SQL DDL query inside your Supabase **SQL Editor** to provision the `upload_queue` table:
 
 ```sql
@@ -99,6 +108,49 @@ with check (true);
 
 create policy "Allow public delete upload_queue for prototype"
 on upload_queue
+for delete
+using (true);
+```
+
+### 2. Create `drive_videos` Table
+
+Execute the following SQL DDL query inside your Supabase **SQL Editor** to provision the `drive_videos` table for Google Drive Picked files:
+
+```sql
+create table if not exists drive_videos (
+  id text primary key,
+  drive_file_id text not null unique,
+  title text not null,
+  file_name text not null,
+  mime_type text,
+  url text,
+  thumbnail_url text,
+  size_bytes bigint,
+  status text not null default 'Draft' check (status in ('Draft', 'Scheduled', 'Uploaded', 'Failed')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table drive_videos enable row level security;
+
+create policy "Allow public read drive_videos for prototype"
+on drive_videos
+for select
+using (true);
+
+create policy "Allow public insert drive_videos for prototype"
+on drive_videos
+for insert
+with check (true);
+
+create policy "Allow public update drive_videos for prototype"
+on drive_videos
+for update
+using (true)
+with check (true);
+
+create policy "Allow public delete drive_videos for prototype"
+on drive_videos
 for delete
 using (true);
 ```

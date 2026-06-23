@@ -44,6 +44,13 @@ import { Video, QueueItem, mapToQueueItem, mapToDbItem } from './types';
 import { INITIAL_VIDEOS, PRESET_HASHTAGS, PRESET_MOCK_COVERS } from './data/mockVideos';
 import { isSupabaseConfigured } from './lib/supabase';
 import {
+  getDriveVideos,
+  upsertDriveVideo,
+  upsertDriveVideos,
+  updateDriveVideoStatus,
+  deleteDriveVideo
+} from './services/driveVideoService';
+import {
   getUploadQueue,
   addUploadQueueItem,
   deleteUploadQueueItem,
@@ -140,18 +147,46 @@ export default function App() {
       const mappedQueue = dbQueue.map(mapToQueueItem);
       setQueue(mappedQueue);
       
-      setVideos(prev => 
-        prev.map(v => {
+      const dbDriveVideos = await getDriveVideos();
+      const mappedDriveVideos: Video[] = dbDriveVideos.map(record => {
+        let formattedSize = 'Unknown size';
+        if (record.size_bytes) {
+          const mb = Number(record.size_bytes) / (1024 * 1024);
+          formattedSize = mb >= 1.0 ? `${mb.toFixed(1)} MB` : `${(mb * 1024).toFixed(0)} KB`;
+        }
+        return {
+          id: record.id || `drive-${record.drive_file_id}`,
+          driveFileId: record.drive_file_id,
+          title: record.title,
+          fileName: record.file_name,
+          duration: '0:30',
+          status: record.status,
+          size: formattedSize,
+          resolution: '1080p (Drive)',
+          thumbnailGradient: 'bg-gradient-to-br from-[#1e293b] via-[#0f172a] to-[#020617]',
+          source: 'drive',
+          mimeType: record.mime_type || undefined,
+          url: record.url || undefined,
+          thumbnailUrl: record.thumbnail_url || undefined,
+          sizeBytes: record.size_bytes || undefined
+        };
+      });
+
+      setVideos(prev => {
+        const nonDriveVideos = prev.filter(v => v.source !== 'drive');
+        const merged = [...nonDriveVideos, ...mappedDriveVideos];
+        
+        return merged.map(v => {
           const matchingDbItem = dbQueue.find(q => q.video_id === v.id) || dbQueue.find(q => q.file_name === v.fileName);
           if (matchingDbItem) {
             return { ...v, status: matchingDbItem.status };
           }
-          return { ...v, status: 'Draft' };
-        })
-      );
+          return { ...v, status: v.status || 'Draft' };
+        });
+      });
     } catch (err: any) {
       setDbError(err.message || 'Unknown database error occurred');
-      showNotification('Failed to load queue from Supabase', 'error');
+      showNotification('Failed to load data from Supabase', 'error');
     } finally {
       setDbLoading(false);
     }
@@ -228,52 +263,101 @@ export default function App() {
         return;
       }
 
-      let addedCount = 0;
-      let duplicateCount = 0;
-      const newDriveVideos: Video[] = [];
-
-      selectedFiles.forEach((file) => {
-        const isDuplicate = videos.some(v => v.source === 'drive' && v.driveFileId === file.driveFileId);
-        if (isDuplicate) {
-          duplicateCount++;
-          return;
-        }
-
-        let formattedSize = 'Unknown size';
-        if (file.sizeBytes) {
-          const mb = Number(file.sizeBytes) / (1024 * 1024);
-          formattedSize = mb >= 1.0 ? `${mb.toFixed(1)} MB` : `${(mb * 1024).toFixed(0)} KB`;
-        }
-
-        const driveVideoItem: Video = {
-          id: `drive-${file.driveFileId}`,
-          driveFileId: file.driveFileId,
+      // Convert selected files to DriveVideoRecord payload for database saving
+      const recordsToUpsert = selectedFiles.map(file => {
+        const existingLocally = videos.find(v => v.driveFileId === file.driveFileId);
+        return {
+          id: existingLocally?.id || `drive-${file.driveFileId}`,
+          drive_file_id: file.driveFileId,
           title: file.name,
-          fileName: file.name,
-          duration: '0:30',
-          status: 'Draft',
-          size: formattedSize,
-          resolution: '1080p (Drive)',
-          thumbnailGradient: 'bg-gradient-to-br from-[#1e293b] via-[#0f172a] to-[#020617]',
-          source: 'drive',
-          mimeType: file.mimeType,
-          url: file.url,
-          thumbnailUrl: file.thumbnailUrl,
-          sizeBytes: file.sizeBytes
+          file_name: file.name,
+          mime_type: file.mimeType || null,
+          url: file.url || null,
+          thumbnail_url: file.thumbnailUrl || null,
+          size_bytes: file.sizeBytes ? Number(file.sizeBytes) : null,
+          status: (existingLocally?.status || 'Draft') as 'Draft' | 'Scheduled' | 'Uploaded' | 'Failed',
         };
-        newDriveVideos.push(driveVideoItem);
-        addedCount++;
+      });
+
+      // Save to Supabase table drive_videos using upsert if configured
+      if (isSupabaseConfigured) {
+        try {
+          await upsertDriveVideos(recordsToUpsert);
+        } catch (err: any) {
+          console.error("Supabase upsert failed:", err);
+          showNotification(`Database save warning: ${err.message}`, 'error');
+        }
+      }
+
+      let addedCount = 0;
+      let updatedCount = 0;
+      let firstDriveVideo: Video | null = null;
+
+      setVideos(prev => {
+        const updatedList = [...prev];
+        selectedFiles.forEach((file) => {
+          let formattedSize = 'Unknown size';
+          if (file.sizeBytes) {
+            const mb = Number(file.sizeBytes) / (1024 * 1024);
+            formattedSize = mb >= 1.0 ? `${mb.toFixed(1)} MB` : `${(mb * 1024).toFixed(0)} KB`;
+          }
+
+          const matchedIndex = updatedList.findIndex(v => v.source === 'drive' && v.driveFileId === file.driveFileId);
+          if (matchedIndex > -1) {
+            // Update existing record
+            const updatedItem: Video = {
+              ...updatedList[matchedIndex],
+              title: file.name,
+              fileName: file.name,
+              size: formattedSize,
+              url: file.url,
+              thumbnailUrl: file.thumbnailUrl,
+              sizeBytes: file.sizeBytes,
+              mimeType: file.mimeType,
+            };
+            updatedList[matchedIndex] = updatedItem;
+            updatedCount++;
+            if (!firstDriveVideo) {
+              firstDriveVideo = updatedItem;
+            }
+          } else {
+            // Append new record
+            const driveVideoItem: Video = {
+              id: `drive-${file.driveFileId}`,
+              driveFileId: file.driveFileId,
+              title: file.name,
+              fileName: file.name,
+              duration: '0:30',
+              status: 'Draft',
+              size: formattedSize,
+              resolution: '1080p (Drive)',
+              thumbnailGradient: 'bg-gradient-to-br from-[#1e293b] via-[#0f172a] to-[#020617]',
+              source: 'drive',
+              mimeType: file.mimeType,
+              url: file.url,
+              thumbnailUrl: file.thumbnailUrl,
+              sizeBytes: file.sizeBytes
+            };
+            updatedList.push(driveVideoItem);
+            addedCount++;
+            if (!firstDriveVideo) {
+              firstDriveVideo = driveVideoItem;
+            }
+          }
+        });
+        return updatedList;
       });
 
       if (addedCount > 0) {
-        setVideos(prev => [...prev, ...newDriveVideos]);
         showNotification(`Successfully imported ${addedCount} videos from Google Drive!`, 'success');
-        
-        const firstAdded = newDriveVideos[0];
-        setSelectedVideoId(firstAdded.id);
-        handleSelectVideo(firstAdded);
-      } else if (duplicateCount > 0) {
-        showNotification('The chosen Google Drive video is already in your Video Bank.', 'info');
+      } else if (updatedCount > 0) {
+        showNotification(`Updated ${updatedCount} existing Google Drive videos!`, 'success');
+      }
+
+      if (firstDriveVideo) {
+        const target: Video = firstDriveVideo;
+        setSelectedVideoId(target.id);
+        handleSelectVideo(target);
       }
     } catch (err: any) {
       console.error("Google Picker Error: ", err);
@@ -364,6 +448,17 @@ export default function App() {
       try {
         const payload = mapToDbItem(newQueueItem);
         await addUploadQueueItem(payload);
+
+        // Sync Drive video status if from Drive
+        if (selectedVideoObj.source === 'drive') {
+          try {
+            await updateDriveVideoStatus(selectedVideoObj.id, 'Scheduled');
+          } catch (driveErr: any) {
+            console.warn("Could not sync status to drive_videos table:", driveErr);
+            showNotification("Warning: Could not update database status for Google Drive video.", "info");
+          }
+        }
+
         setQueue(prev => [...prev, newQueueItem]);
         setVideos(prev => prev.map(v => v.id === selectedVideoObj.id ? { ...v, status: 'Scheduled' } : v));
         showNotification(`Successfully scheduled in Supabase: "${ytTitle}"`);
@@ -382,6 +477,18 @@ export default function App() {
     if (isSupabaseConfigured) {
       try {
         await deleteUploadQueueItem(itemId);
+
+        // Sync Drive video status if from Drive
+        const matchedVideo = videos.find(v => v.id === videoId);
+        if (matchedVideo && matchedVideo.source === 'drive') {
+          try {
+            await updateDriveVideoStatus(videoId, 'Draft');
+          } catch (driveErr: any) {
+            console.warn("Could not reset status to Draft in drive_videos:", driveErr);
+            showNotification("Warning: Could not check in Drive video draft status in database.", "info");
+          }
+        }
+
         setQueue(prev => prev.filter(item => item.id !== itemId));
         setVideos(prev => prev.map(v => v.id === videoId ? { ...v, status: 'Draft' } : v));
         showNotification('Item removed from queue and deleted from Supabase.', 'info');
@@ -393,6 +500,31 @@ export default function App() {
       // Reset video status in bank to Draft
       setVideos(prev => prev.map(v => v.id === videoId ? { ...v, status: 'Draft' } : v));
       showNotification('Item removed from queue and set back to Draft.', 'info');
+    }
+  };
+
+  const handleRemoveDriveVideo = async (id: string) => {
+    try {
+      const inQueue = queue.some(q => q.videoId === id);
+      if (inQueue) {
+        showNotification("This video is currently scheduled in the queue. Please remove it from the queue first.", "error");
+        return;
+      }
+
+      setVideos(prev => prev.filter(v => v.id !== id));
+      if (selectedVideoId === id) {
+        setSelectedVideoId(null);
+      }
+
+      if (isSupabaseConfigured) {
+        await deleteDriveVideo(id);
+        showNotification("Successfully removed Drive video from your Bank.", "success");
+      } else {
+        showNotification("Successfully removed Drive video locally.", "success");
+      }
+    } catch (err: any) {
+      console.error("Error removing Drive video:", err);
+      showNotification(`Failed to remove Drive video: ${err.message}`, 'error');
     }
   };
 
@@ -438,6 +570,16 @@ export default function App() {
             if (isSupabaseConfigured) {
               try {
                 await updateUploadQueueStatus(currentItem.id, 'Uploaded');
+
+                // Sync Drive video status if from Drive
+                const matchedVideo = videos.find(v => v.id === currentItem.videoId);
+                if (matchedVideo && matchedVideo.source === 'drive') {
+                  try {
+                    await updateDriveVideoStatus(currentItem.videoId, 'Uploaded');
+                  } catch (driveErr: any) {
+                    console.error("Failed to update status to Uploaded in drive_videos:", driveErr);
+                  }
+                }
               } catch (err: any) {
                 console.error("Failed to update status in Supabase:", err);
               }
@@ -532,20 +674,22 @@ export default function App() {
                 if (isSupabaseConfigured) {
                   try {
                     await clearUploadQueue();
+                    await fetchQueue();
                     showNotification('Supabase queue purged successfully!', 'info');
                   } catch (err: any) {
                     showNotification(`Failed to purge Supabase: ${err.message}`, 'error');
                   }
+                } else {
+                  setVideos(INITIAL_VIDEOS.map(v => ({ ...v, source: 'mock' as const })));
+                  setQueue([]);
+                  setSelectedVideoId('vid-1');
+                  setYtTitle('One Piece Theory - Joy Boy Secret 🔥');
+                  setYtDescription('An incredible theory exploring Joy Boy secret. What was his true identity in the Void Century?');
+                  setYtHashtags('#shorts #onepiece #animefacts');
+                  setYtCoverGradient('bg-gradient-to-br from-amber-500 via-orange-600 to-rose-600');
+                  setYtVisibility('Public');
+                  showNotification('Dashboard reset to factory settings.', 'info');
                 }
-                setVideos(INITIAL_VIDEOS);
-                setQueue([]);
-                setSelectedVideoId('vid-1');
-                setYtTitle('One Piece Theory - Joy Boy Secret 🔥');
-                setYtDescription('An incredible theory exploring Joy Boy secret. What was his true identity in the Void Century?');
-                setYtHashtags('#shorts #onepiece #animefacts');
-                setYtCoverGradient('bg-gradient-to-br from-amber-500 via-orange-600 to-rose-600');
-                setYtVisibility('Public');
-                showNotification('Dashboard reset to factory settings.', 'info');
               }}
               title="Reset state to initial seeds"
               className="px-3 py-1.5 bg-white/[0.05] hover:bg-white/[0.12] active:bg-white/[0.02] border border-white/10 rounded-xl text-xs flex items-center gap-1.5 transition-all text-slate-300 hover:text-white cursor-pointer"
@@ -754,6 +898,14 @@ export default function App() {
                 </form>
               )}
 
+              {/* Optional info note */}
+              <div className="bg-blue-500/5 border border-blue-500/10 rounded-xl p-3 text-xs text-blue-300 flex items-start gap-2">
+                <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                <p className="leading-normal">
+                  Drive videos are saved after selection and will remain available after refresh.
+                </p>
+              </div>
+
               {/* SEARCH & FILTERS */}
               <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-xl px-3 py-2">
                 <Search className="w-4 h-4 text-slate-400" />
@@ -838,6 +990,21 @@ export default function App() {
                           </span>
 
                           <div className="flex items-center gap-1.5">
+                            {video.source === 'drive' && (
+                              <button
+                                type="button"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  await handleRemoveDriveVideo(video.id);
+                                }}
+                                className="p-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border border-red-500/20 rounded-lg text-[10px] flex items-center justify-center gap-1 cursor-pointer font-bold px-1.5 transition-colors"
+                                title="Remove from Bank (Does not delete Google Drive file)"
+                              >
+                                <Trash2 className="w-3 h-3 text-red-400" />
+                                <span>Remove</span>
+                              </button>
+                            )}
+
                             {video.status === 'Uploaded' ? (
                               <span className="text-[9px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 font-bold px-2 py-0.5 rounded-full">
                                 Published

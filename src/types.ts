@@ -1,3 +1,17 @@
+export interface DriveVideoRecord {
+  id: string;
+  drive_file_id: string;
+  title: string;
+  file_name: string;
+  mime_type?: string | null;
+  url?: string | null;
+  thumbnail_url?: string | null;
+  size_bytes?: number | null;
+  status: "Draft" | "Scheduled" | "Uploaded" | "Failed";
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface Video {
   id: string;
   title: string;
