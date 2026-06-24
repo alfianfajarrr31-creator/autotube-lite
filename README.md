@@ -1,8 +1,14 @@
-# AutoTube Lite ARC 7.1 — Uploaded State UX Cleanup
+# AutoTube Lite ARC 7.2 — Cleanup Labels & Metadata
 
 AutoTube Lite is a lightweight YouTube Shorts upload and scheduling dashboard.
 
-ARC 7.1 improves the user experience after a queue item has been uploaded. Instead of treating uploaded videos as blocked/disabled items with errors, ARC 7.1 presents successful uploads as complete, clear achievements while ensuring duplicate uploads are prevented for safety.
+ARC 7.2 cleans up leftover AI Studio/Gemini metadata and outdated ARC labels to ensure consistency. Single manual video upload remains fully active, while batch upload and automatic background scheduling are not active yet. No new environment variables or database tables have been added.
+
+## Key Changes in ARC 7.2
+
+- **Metadata Cleanup**: Removed unrequested Gemini API capability declarations and refined applet definitions.
+- **Outdated Label Purge**: Cleaned up legacy reference points to ARC 6 or obsolete readiness-only descriptions in the workspace and simulator warnings.
+- **Status & Wording Alignment**: Highlighted that real single-video manual upload is fully active while simulation mode remains distinct as a separate playground tool.
 
 ## Key Features in ARC 7.1
 

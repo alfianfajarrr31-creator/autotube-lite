@@ -1043,7 +1043,7 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-bold font-display tracking-tight text-white">AutoTube Lite</h1>
                 <span className="text-[10px] font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 px-1.5 py-0.5 rounded-md uppercase animate-pulse">
-                  ARC 7.1 Upload UX
+                  ARC 7.2 Upload UX
                 </span>
               </div>
               <p className="text-xs text-slate-400">Google Drive + YouTube Shorts Scheduler</p>
@@ -1365,7 +1365,7 @@ export default function App() {
                 <div className="flex items-start gap-2.5 p-2.5 bg-amber-500/5 border border-amber-500/10 rounded-xl text-left">
                   <Info className="w-4 h-4 text-amber-500/85 shrink-0 mt-0.5" />
                   <span className="text-[10px] text-amber-200/80 leading-normal">
-                    <strong>Note:</strong> ARC 6 checks whether queued videos are ready. Uploading will come in a later ARC.
+                    <strong>Note:</strong> ARC 7.2 supports manual single-video upload. Batch upload and automatic scheduling are not active yet.
                   </span>
                 </div>
               </div>
@@ -1604,7 +1604,7 @@ export default function App() {
                       <span>Demo Upload Simulation</span>
                     </button>
                   </div>
-                  <span className="text-[9px] text-slate-400 font-medium">ARC 6 only checks readiness. Prototype only — this does not upload to YouTube yet.</span>
+                  <span className="text-[9px] text-slate-400 font-medium">Demo simulation is separate from real upload. Use Upload to YouTube for one manual upload.</span>
                 </div>
               </div>
 
@@ -1625,7 +1625,7 @@ export default function App() {
                   <div className="col-span-3 flex items-start gap-2.5 p-2.5 bg-sky-500/5 border border-sky-500/10 rounded-xl text-left">
                     <Info className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
                     <span className="text-[10px] text-sky-100/80 leading-normal">
-                      ARC 6 only checks whether videos are ready. It does not upload anything to YouTube yet.
+                      ARC 7.2 supports manual single-video upload. Batch upload and automatic scheduling are not active yet.
                       {readinessSummaryMessage ? ` Latest check: ${readinessSummaryMessage}` : ''}
                     </span>
                   </div>

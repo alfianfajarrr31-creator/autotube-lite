@@ -1,6 +1,5 @@
 {
   "name": "AutoTube Lite",
-  "description": "A lightweight YouTube Shorts upload and scheduling dashboard with Google Drive, metadata presets, YouTube channel connect, and upload readiness checks.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "description": "A lightweight YouTube Shorts upload and scheduling dashboard with Google Drive, metadata presets, YouTube channel connect, upload readiness checks, and single YouTube upload.",
+  "requestFramePermissions": []
 }
