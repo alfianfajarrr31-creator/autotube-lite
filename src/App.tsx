@@ -44,6 +44,7 @@ import {
   LogOut
 } from 'lucide-react';
 import { Video, QueueItem, mapToQueueItem, mapToDbItem } from './types';
+import { checkUploadReadiness } from './utils/uploadReadiness';
 import { INITIAL_VIDEOS, PRESET_HASHTAGS, PRESET_MOCK_COVERS } from './data/mockVideos';
 import { METADATA_PRESETS, generateTitleFromFileName } from './data/metadataPresets';
 import { isSupabaseConfigured } from './lib/supabase';
@@ -128,6 +129,10 @@ export default function App() {
   // Interactive Upload simulation state
   const [simulationActive, setSimulationActive] = useState(false);
   const [simLog, setSimLog] = useState<string | null>(null);
+
+  // Upload readiness check state
+  const [readinessOpenId, setReadinessOpenId] = useState<string | null>(null);
+  const [readinessSummaryMessage, setReadinessSummaryMessage] = useState<string | null>(null);
 
   // Quick form state for "Creating own custom mocked Video"
   const [isAddMockOpen, setIsAddMockOpen] = useState(false);
@@ -406,6 +411,40 @@ export default function App() {
       failed: failedCount
     };
   }, [videos, queue]);
+
+  const readinessResults = useMemo(() => {
+    const isYouTubeConnected = ytChannelStatus === 'YouTube Connected' && !!selectedYtChannel;
+    return queue.map(item => ({
+      item,
+      result: checkUploadReadiness(item, {
+        isYouTubeConnected,
+        selectedYouTubeChannel: selectedYtChannel,
+        driveVideos: videos,
+      })
+    }));
+  }, [queue, videos, ytChannelStatus, selectedYtChannel]);
+
+  const readinessSummary = useMemo(() => {
+    return readinessResults.reduce(
+      (acc, entry) => {
+        if (entry.result.level === 'ready') acc.ready += 1;
+        if (entry.result.level === 'warning') acc.warning += 1;
+        if (entry.result.level === 'blocked') acc.blocked += 1;
+        return acc;
+      },
+      { ready: 0, warning: 0, blocked: 0 }
+    );
+  }, [readinessResults]);
+
+  const getReadinessForItem = (itemId: string) => {
+    return readinessResults.find(entry => entry.item.id === itemId)?.result;
+  };
+
+  const handleCheckAllQueue = () => {
+    const message = `${readinessSummary.ready} ready, ${readinessSummary.warning} need review, ${readinessSummary.blocked} blocked.`;
+    setReadinessSummaryMessage(message);
+    showNotification(`Readiness check complete: ${message}`, readinessSummary.blocked > 0 ? 'error' : 'info');
+  };
 
   // Handlers
   const handlePickFromGoogleDrive = async () => {
@@ -810,7 +849,7 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-bold font-display tracking-tight text-white">AutoTube Lite</h1>
                 <span className="text-[10px] font-mono font-bold bg-purple-500/20 text-purple-400 border border-purple-500/30 px-1.5 py-0.5 rounded-md uppercase animate-pulse">
-                  ARC 4 Metadata Presets
+                  ARC 6 Upload Readiness
                 </span>
               </div>
               <p className="text-xs text-slate-400">Google Drive + YouTube Shorts Scheduler</p>
@@ -1132,7 +1171,7 @@ export default function App() {
                 <div className="flex items-start gap-2.5 p-2.5 bg-amber-500/5 border border-amber-500/10 rounded-xl text-left">
                   <Info className="w-4 h-4 text-amber-500/85 shrink-0 mt-0.5" />
                   <span className="text-[10px] text-amber-200/80 leading-normal">
-                    <strong>Note:</strong> ARC 5 only connects and reads your YouTube channel metadata. Uploading and automated scheduling features will come in the next ARC release.
+                    <strong>Note:</strong> ARC 6 checks whether queued videos are ready. Uploading will come in a later ARC.
                   </span>
                 </div>
               </div>
@@ -1352,17 +1391,52 @@ export default function App() {
                 </div>
 
                 <div className="flex flex-col items-end gap-1 text-right">
-                  <button
-                    disabled={simulationActive || queue.filter(q => q.status === 'Scheduled').length === 0}
-                    onClick={runSchedulerSimulation}
-                    className="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-rose-600 text-white text-xs font-bold rounded-xl hover:from-purple-500 hover:to-rose-500 active:scale-95 transition-all disabled:opacity-40 disabled:pointer-events-none flex items-center gap-1 cursor-pointer shadow-lg shadow-purple-900/10"
-                  >
-                    <Zap className="w-3.5 h-3.5 fill-amber-300 stroke-amber-300" />
-                    <span>Demo Upload Simulation</span>
-                  </button>
-                  <span className="text-[9px] text-slate-400 font-medium">Prototype only — this does not upload to YouTube yet.</span>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <button
+                      type="button"
+                      disabled={queue.length === 0}
+                      onClick={handleCheckAllQueue}
+                      className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 active:scale-95 text-white text-xs font-bold rounded-xl transition-all disabled:opacity-40 disabled:pointer-events-none flex items-center gap-1 cursor-pointer shadow-lg shadow-sky-900/10"
+                    >
+                      <Search className="w-3.5 h-3.5" />
+                      <span>Check All Queue</span>
+                    </button>
+                    <button
+                      disabled={simulationActive || queue.filter(q => q.status === 'Scheduled').length === 0}
+                      onClick={runSchedulerSimulation}
+                      className="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-rose-600 text-white text-xs font-bold rounded-xl hover:from-purple-500 hover:to-rose-500 active:scale-95 transition-all disabled:opacity-40 disabled:pointer-events-none flex items-center gap-1 cursor-pointer shadow-lg shadow-purple-900/10"
+                    >
+                      <Zap className="w-3.5 h-3.5 fill-amber-300 stroke-amber-300" />
+                      <span>Demo Upload Simulation</span>
+                    </button>
+                  </div>
+                  <span className="text-[9px] text-slate-400 font-medium">ARC 6 only checks readiness. Prototype only — this does not upload to YouTube yet.</span>
                 </div>
               </div>
+
+              {queue.length > 0 && !dbLoading && !dbError && (
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-center">
+                    <p className="text-lg font-black text-emerald-300">{readinessSummary.ready}</p>
+                    <p className="text-[9px] uppercase font-bold text-emerald-400">Ready</p>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-center">
+                    <p className="text-lg font-black text-amber-300">{readinessSummary.warning}</p>
+                    <p className="text-[9px] uppercase font-bold text-amber-400">Needs Review</p>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-center">
+                    <p className="text-lg font-black text-rose-300">{readinessSummary.blocked}</p>
+                    <p className="text-[9px] uppercase font-bold text-rose-400">Blocked</p>
+                  </div>
+                  <div className="col-span-3 flex items-start gap-2.5 p-2.5 bg-sky-500/5 border border-sky-500/10 rounded-xl text-left">
+                    <Info className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
+                    <span className="text-[10px] text-sky-100/80 leading-normal">
+                      ARC 6 only checks whether videos are ready. It does not upload anything to YouTube yet.
+                      {readinessSummaryMessage ? ` Latest check: ${readinessSummaryMessage}` : ''}
+                    </span>
+                  </div>
+                </div>
+              )}
 
               {simulationActive && (
                 <div className="bg-white/10 border border-white/10 p-3 rounded-xl flex items-center gap-2 text-xs text-slate-200 backdrop-blur-md animate-fadeIn">
@@ -1415,6 +1489,13 @@ export default function App() {
                 <div className="flex flex-col gap-3">
                   {queue.map((item) => {
                     const isProcessing = simulationActive && item.progress !== undefined;
+                    const readiness = getReadinessForItem(item.id);
+                    const readinessLabel = readiness?.level === 'ready' ? 'Ready to Upload' : readiness?.level === 'warning' ? 'Needs Review' : 'Blocked';
+                    const readinessClass = readiness?.level === 'ready'
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/20'
+                      : readiness?.level === 'warning'
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/20'
+                        : 'bg-rose-500/20 text-rose-300 border-rose-500/20';
                     
                     return (
                       <div 
@@ -1472,9 +1553,46 @@ export default function App() {
                                 <Globe className="w-2.5 h-2.5 text-red-400" />
                                 {item.visibility}
                               </span>
+                              {readiness && (
+                                <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded flex items-center gap-1 border uppercase tracking-tighter ${readinessClass}`}>
+                                  {readiness.level === 'ready' ? <CheckCircle className="w-2.5 h-2.5" /> : readiness.level === 'warning' ? <AlertTriangle className="w-2.5 h-2.5" /> : <XCircle className="w-2.5 h-2.5" />}
+                                  {readinessLabel}
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>
+
+                        {readinessOpenId === item.id && readiness && (
+                          <div className="md:col-span-2 w-full bg-black/35 border border-white/10 rounded-xl p-3 text-[10px] text-left">
+                            <div className="font-bold text-white mb-2 flex items-center gap-1.5">
+                              {readiness.level === 'ready' ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> : readiness.level === 'warning' ? <AlertTriangle className="w-3.5 h-3.5 text-amber-400" /> : <XCircle className="w-3.5 h-3.5 text-rose-400" />}
+                              Upload Readiness: {readinessLabel}
+                            </div>
+                            {selectedYtChannel && (
+                              <p className="text-slate-400 mb-2">Target channel: <span className="text-slate-200 font-semibold">{selectedYtChannel.title}</span></p>
+                            )}
+                            {readiness.issues.length > 0 && (
+                              <div className="mb-2">
+                                <p className="text-rose-300 font-bold uppercase tracking-wider mb-1">Blocked issues</p>
+                                <ul className="list-disc list-inside space-y-0.5 text-rose-200/90">
+                                  {readiness.issues.map((issue, index) => <li key={`issue-${item.id}-${index}`}>{issue}</li>)}
+                                </ul>
+                              </div>
+                            )}
+                            {readiness.warnings.length > 0 && (
+                              <div>
+                                <p className="text-amber-300 font-bold uppercase tracking-wider mb-1">Warnings</p>
+                                <ul className="list-disc list-inside space-y-0.5 text-amber-100/90">
+                                  {readiness.warnings.map((warning, index) => <li key={`warning-${item.id}-${index}`}>{warning}</li>)}
+                                </ul>
+                              </div>
+                            )}
+                            {readiness.issues.length === 0 && readiness.warnings.length === 0 && (
+                              <p className="text-emerald-200">No blocked issues or warnings found. This item is ready for the next upload ARC.</p>
+                            )}
+                          </div>
+                        )}
 
                         {/* Status Progress details & Remove Option */}
                         <div className="flex md:flex-col items-end justify-between md:justify-center gap-2 md:gap-1 pl-4 md:pl-0 pt-2 md:pt-0 border-t md:border-t-0 border-white/10">
@@ -1506,14 +1624,25 @@ export default function App() {
 
                           {/* Action button */}
                           {!simulationActive && (
-                            <button
-                              onClick={() => handleRemoveFromQueue(item.id, item.videoId)}
-                              className="p-1 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded transition text-xs flex items-center gap-1 cursor-pointer"
-                              title="Delete from schedule queue"
-                            >
-                              <X className="w-4 h-4" />
-                              <span className="md:hidden text-[10px]">Remove</span>
-                            </button>
+                            <div className="flex md:flex-col items-end gap-1">
+                              <button
+                                type="button"
+                                onClick={() => setReadinessOpenId(readinessOpenId === item.id ? null : item.id)}
+                                className="px-2 py-1 text-[10px] text-sky-300 hover:text-white bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/20 rounded-lg transition flex items-center gap-1 cursor-pointer"
+                                title="Check upload readiness"
+                              >
+                                <Search className="w-3 h-3" />
+                                <span>Check Readiness</span>
+                              </button>
+                              <button
+                                onClick={() => handleRemoveFromQueue(item.id, item.videoId)}
+                                className="p-1 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded transition text-xs flex items-center gap-1 cursor-pointer"
+                                title="Delete from schedule queue"
+                              >
+                                <X className="w-4 h-4" />
+                                <span className="md:hidden text-[10px]">Remove</span>
+                              </button>
+                            </div>
                           )}
                         </div>
 
