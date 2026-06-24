@@ -1,20 +1,21 @@
-# AutoTube Lite ARC 4 — Metadata Template & Preset
+# AutoTube Lite ARC 5 — YouTube Connect
 
 AutoTube Lite is a lightweight YouTube Shorts upload and scheduling dashboard.
 
-With **ARC 4**, we have introduced non-AI **Metadata Templates & Presets** allowing you to apply pre-defined, standardized metadata (such as Descriptions, Hashtags, and stylized Thumbnail Text Overlays) to your draft videos rapidly.
+With **ARC 5**, we have introduced **YouTube Connect**, enabling users to securely connect their YouTube account via OAuth, view their basic channel metrics (channel title, custom URL, subscriber count, total video count, and profile avatar), and select between multiple channels. 
 
-### 📝 Key Features in ARC 4
-- **Interactive Metadata Presets**: Apply standardized metadata presets (gaming, anime, tutorial, daily vlog, and tech review) in one click.
-- **Visual Thumbnail Text Overlay**: View your chosen thumbnail overlay text on the live 9:16 Shorts cover preview and on scheduled queue items.
-- **Title Auto-Generation**: Clean title auto-generation from selected video file names or titles (capitalizes first letters, removes file extensions and underscores/dashes).
-- **Flexible Manual Customization**: Apply presets partially (description only, hashtags only, or cover text only) or fully, while keeping full manual editing capabilities intact.
-- **Clear Metadata Action**: Clear form input fields in a single click without affecting scheduling details or selected videos.
+### 📝 Key Features in ARC 5
+- **OAuth-Based YouTube Integration**: Connect your YouTube account securely using Google Identity Services token client model.
+- **YouTube Data API v3 Channel Extraction**: Automatically reads channel profile thumbnail, display name, custom handle / vanity URL, subscribers, total uploads count, and channel ID.
+- **Multi-Channel Selection Dropdown**: If your Google account holds multiple channels, choose the exact channel profile to connect from an interactive dropdown.
+- **Responsive Status Badging**: View connection health with live indicators (`YouTube Connected`, `YouTube Not Connected`, etc.) and helpful inline warning/info banners.
+- **Local Persistence**: Saves your selected YouTube channel info in `localStorage` so your connection is restored instantly upon refresh without re-triggering prompt consents.
+- **Shared Google Loader**: Shares the exact same script loader with Google Drive Picker to prevent loading race conditions and minimize bandwidth.
 
 ### ⚙️ Constraints and Requirements
-- **No AI Dependency**: Built with lightning-fast static templates and local utilities to completely bypass slow or expensive AI API dependencies (no Gemini/OpenAI/Claude API integration, no new dependencies).
-- **No Database Schema Changes**: Leverages the existing `upload_queue` table columns securely (storing both gradient and overlay text natively under `thumbnail_text`).
-- **No New Environment Variables**: No extra API keys or variables are needed. Standard Supabase and Google Drive env variables remain required to enable video bank and queue persistence.
+- **No AI Dependency**: Built with lightning-fast static templates and local utilities to completely bypass slow or expensive AI API dependencies.
+- **Reads Only**: ARC 5 only connects and reads your YouTube channel metadata. Uploading and automated scheduling features will come in the next ARC release.
+- **No New Environment Variables**: Reuses your existing Google credentials (`VITE_GOOGLE_CLIENT_ID`, `VITE_GOOGLE_API_KEY`, `VITE_GOOGLE_APP_ID`) to keep workspace configuration completely minimal.
 
 ---
 
@@ -27,7 +28,7 @@ To connect AutoTube Lite to your Supabase and Google Developer projects, create 
 VITE_SUPABASE_URL=YOUR_SUPABASE_PROJECT_URL
 VITE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_PUBLIC_KEY
 
-# Google Drive Connect & Picker Configuration (ARC 3)
+# Google Drive & YouTube Connect Configuration (ARC 3/5)
 VITE_GOOGLE_CLIENT_ID=YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com
 VITE_GOOGLE_API_KEY=YOUR_GOOGLE_API_KEY
 VITE_GOOGLE_APP_ID=YOUR_GOOGLE_PROJECT_NUMBER
@@ -37,9 +38,9 @@ VITE_GOOGLE_APP_ID=YOUR_GOOGLE_PROJECT_NUMBER
 
 ---
 
-## 🌐 ARC 3 — Google Drive Setup Reference
+## 🌐 ARC 3/5 — Google Cloud Console Setup Reference
 
-To establish a functioning Google Picker inside the app, complete the following setup on Google Cloud Console:
+To establish a functioning Google Picker and YouTube Channel Connection inside the app, complete the following setup on Google Cloud Console:
 
 ### 1. Enable APIs in Google Cloud Console
 - Go to the [Google Cloud Console](https://console.cloud.google.com/).
@@ -47,22 +48,25 @@ To establish a functioning Google Picker inside the app, complete the following 
 - Locate and Enable:
   - **Google Drive API**
   - **Google Picker API**
+  - **YouTube Data API v3** (Critical for ARC 5!)
 
 ### 2. Configure OAuth Consent Screen
 - Navigate to **APIs & Services > OAuth consent screen**.
 - Create/Configure your screen and specify your contact details.
-- Add the required scope:
+- Add the required scopes:
   - `https://www.googleapis.com/auth/drive.file` (gives access only to files opened/created with the app via Google Picker).
+  - `https://www.googleapis.com/auth/youtube.readonly` (gives access to read connected YouTube channel metrics).
+- **Test Users**: Under Testing mode, you must add your YouTube account email address as a "Test User" so Google lets you authorize without warning blocks.
 
 ### 3. Create App Credentials
 - Navigate to **APIs & Services > Credentials** and click **+ Create Credentials**:
-  - **A. OAuth client ID** (Application type: **Web application**):
-    - Add **Authorized JavaScript origins** for your local test environment and live preview URLs:
-      - `http://localhost:3000` (or local port `5173`/`3000`)
-      - Your dynamic AI Studio development URL (e.g. `https://ais-dev-7v3a2gy3hmazdpezt7kq5j-904379685516.asia-east1.run.app`)
-      - Your Shared/Deployed preview URL (e.g. `https://ais-pre-7v3a2gy3hmazdpezt7kq5j-904379685516.asia-east1.run.app`)
-  - **B. API key**:
-    - Select and copy the newly generated browser API key.
+- **A. OAuth client ID** (Application type: **Web application**):
+  - Add **Authorized JavaScript origins** for your local test environment and live preview URLs:
+    - `http://localhost:3000` (or local port `5173`/`3000`)
+    - Your dynamic AI Studio development URL (e.g. `https://ais-dev-7v3a2gy3hmazdpezt7kq5j-904379685516.asia-east1.run.app`)
+    - Your Shared/Deployed preview URL (e.g. `https://ais-pre-7v3a2gy3hmazdpezt7kq5j-904379685516.asia-east1.run.app`)
+- **B. API key**:
+  - Select and copy the newly generated browser API key.
 - **C. Google App ID (Project Number)**:
   - Copy the **Project number** found on the main Google Cloud Project Dashboard.
 

@@ -39,7 +39,9 @@ import {
   Zap,
   Play,
   VideoOff,
-  XCircle
+  XCircle,
+  Users,
+  LogOut
 } from 'lucide-react';
 import { Video, QueueItem, mapToQueueItem, mapToDbItem } from './types';
 import { INITIAL_VIDEOS, PRESET_HASHTAGS, PRESET_MOCK_COVERS } from './data/mockVideos';
@@ -66,6 +68,11 @@ import {
   openGooglePicker,
   checkGoogleConfigured
 } from './services/googleDrivePickerService';
+import {
+  connectYouTube,
+  getMyYouTubeChannels,
+  YouTubeChannelInfo
+} from './services/youtubeService';
 
 export default function App() {
   // State for Video Bank
@@ -134,6 +141,89 @@ export default function App() {
 
   const showNotification = (text: string, type: 'success' | 'info' | 'error' = 'success') => {
     setNotification({ id: String(Date.now()), text, type });
+  };
+
+  // YouTube Channel Connection states
+  const [ytChannelStatus, setYtChannelStatus] = useState<'YouTube Not Connected' | 'Connecting YouTube...' | 'YouTube Connected' | 'YouTube Connect Error'>(() => {
+    const saved = localStorage.getItem('autotube_yt_channel');
+    return saved ? 'YouTube Connected' : (checkGoogleConfigured() ? 'YouTube Not Connected' : 'YouTube Connect Error');
+  });
+  const [ytChannelError, setYtChannelError] = useState<string | null>(() => {
+    return checkGoogleConfigured() ? null : 'Google Client ID / API Key is not configured yet.';
+  });
+  const [ytChannelsList, setYtChannelsList] = useState<YouTubeChannelInfo[]>([]);
+  const [selectedYtChannel, setSelectedYtChannel] = useState<YouTubeChannelInfo | null>(() => {
+    const saved = localStorage.getItem('autotube_yt_channel');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  });
+
+  const handleConnectYouTube = async () => {
+    try {
+      setYtChannelStatus('Connecting YouTube...');
+      setYtChannelError(null);
+      
+      // 1. Ensure Google scripts are loaded using our safe shared loader
+      await loadGoogleScripts();
+      
+      // 2. Request YouTube Readonly OAuth access token
+      const token = await connectYouTube();
+      
+      // 3. Fetch YouTube channel list from Data API v3
+      const channels = await getMyYouTubeChannels(token);
+      
+      setYtChannelsList(channels);
+      
+      if (channels.length === 0) {
+        setYtChannelStatus('YouTube Connect Error');
+        const errStr = 'No YouTube channel found for this Google account.';
+        setYtChannelError(errStr);
+        showNotification(errStr, 'error');
+      } else if (channels.length === 1) {
+        const channel = channels[0];
+        setSelectedYtChannel(channel);
+        localStorage.setItem('autotube_yt_channel', JSON.stringify(channel));
+        setYtChannelStatus('YouTube Connected');
+        showNotification(`Connected to YouTube channel: ${channel.title}`, 'success');
+      } else {
+        // Multiple channels found - select first one automatically but let user choose too
+        const firstChannel = channels[0];
+        setSelectedYtChannel(firstChannel);
+        localStorage.setItem('autotube_yt_channel', JSON.stringify(firstChannel));
+        setYtChannelStatus('YouTube Connected');
+        showNotification(`Connected! Found ${channels.length} channels, loaded "${firstChannel.title}". You can switch channels below.`, 'success');
+      }
+    } catch (err: any) {
+      console.error("YouTube connection failed:", err);
+      setYtChannelStatus('YouTube Connect Error');
+      const msg = err?.message || 'Failed to authorize or fetch YouTube channels.';
+      setYtChannelError(msg);
+      showNotification(msg, 'error');
+    }
+  };
+
+  const handleSelectYtChannel = (channelId: string) => {
+    const target = ytChannelsList.find(c => c.id === channelId);
+    if (target) {
+      setSelectedYtChannel(target);
+      localStorage.setItem('autotube_yt_channel', JSON.stringify(target));
+      showNotification(`Switched YouTube channel to: ${target.title}`, 'success');
+    }
+  };
+
+  const handleDisconnectYouTube = () => {
+    setSelectedYtChannel(null);
+    setYtChannelsList([]);
+    localStorage.removeItem('autotube_yt_channel');
+    setYtChannelStatus(checkGoogleConfigured() ? 'YouTube Not Connected' : 'YouTube Connect Error');
+    setYtChannelError(null);
+    showNotification('Disconnected YouTube account', 'success');
   };
 
   useEffect(() => {
@@ -885,7 +975,7 @@ export default function App() {
                 
                 <button
                   onClick={() => setIsAddMockOpen(!isAddMockOpen)}
-                  className="px-3 py-1.5 bg-red-650 hover:bg-red-700 active:bg-red-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-lg shadow-red-900/10 cursor-pointer"
+                  className="px-3 py-1.5 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-lg shadow-red-900/10 cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Add Custom Video</span>
@@ -923,6 +1013,128 @@ export default function App() {
                   <Globe className="w-4 h-4 shrink-0 text-white" />
                   <span>Pick Videos from Google Drive</span>
                 </button>
+              </div>
+
+              {/* YOUTUBE CHANNEL INTEGRATION CONTROL CARD */}
+              <div className="bg-white/[0.03] hover:bg-white/[0.05] border border-white/10 rounded-2xl p-4 flex flex-col gap-4 transition duration-200">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 w-full">
+                  <div className="flex items-center gap-3 w-full sm:w-auto">
+                    <div className="relative">
+                      <div className={`w-3 h-3 rounded-full ${
+                        ytChannelStatus === 'YouTube Connected' 
+                          ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' 
+                          : ytChannelStatus === 'Connecting YouTube...'
+                            ? 'bg-amber-500 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.5)]'
+                            : ytChannelStatus === 'YouTube Connect Error' 
+                              ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]' 
+                              : 'bg-slate-400'
+                      }`} />
+                    </div>
+                    <div className="flex flex-col text-left">
+                      <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold flex items-center gap-1">
+                        <Youtube className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                        YouTube Channel
+                      </span>
+                      <span className="text-xs font-semibold text-white">{ytChannelStatus}</span>
+                      {ytChannelError && (
+                        <span className="text-[10px] text-rose-400 font-mono mt-0.5 leading-tight max-w-[320px] line-clamp-2" title={ytChannelError}>
+                          ❌ {ytChannelError}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {ytChannelStatus === 'YouTube Connected' && selectedYtChannel ? (
+                    <button
+                      type="button"
+                      onClick={handleDisconnectYouTube}
+                      className="w-full sm:w-auto px-3 py-1.5 bg-white/5 hover:bg-white/10 active:bg-white/15 border border-white/10 text-slate-300 font-semibold rounded-lg text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <LogOut className="w-3.5 h-3.5 shrink-0" />
+                      <span>Disconnect</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleConnectYouTube}
+                      disabled={ytChannelStatus === 'Connecting YouTube...'}
+                      className={`w-full sm:w-auto px-4 py-2.5 font-bold rounded-xl text-xs transition duration-150 flex items-center justify-center gap-2 cursor-pointer shadow-lg shrink-0 ${
+                        ytChannelStatus === 'Connecting YouTube...'
+                          ? 'bg-red-900/40 text-red-400/60 cursor-not-allowed border border-red-500/20'
+                          : 'bg-red-600 hover:bg-red-700 active:bg-red-800 text-white shadow-red-950/30'
+                      }`}
+                    >
+                      <Youtube className="w-4 h-4 shrink-0" />
+                      <span>{ytChannelStatus === 'Connecting YouTube...' ? 'Connecting...' : 'Connect YouTube'}</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Connected Channel Info */}
+                {ytChannelStatus === 'YouTube Connected' && selectedYtChannel && (
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-3 bg-black/40 border border-white/5 rounded-xl animate-fadeIn">
+                    <img 
+                      src={selectedYtChannel.thumbnailUrl || 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=128&auto=format&fit=crop&q=60&ixlib=rb-4.0.3'}
+                      alt={selectedYtChannel.title}
+                      referrerPolicy="no-referrer"
+                      className="w-12 h-12 rounded-full border border-white/15 object-cover shrink-0"
+                    />
+                    <div className="flex-1 min-w-0 text-left">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h4 className="text-sm font-bold text-white truncate">{selectedYtChannel.title}</h4>
+                        {selectedYtChannel.customUrl && (
+                          <span className="text-[10px] text-red-400 font-medium px-1.5 py-0.5 bg-red-500/10 border border-red-500/20 rounded font-mono">
+                            {selectedYtChannel.customUrl}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-400 font-mono mt-0.5 truncate select-all">
+                        ID: {selectedYtChannel.id}
+                      </p>
+
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-[11px] text-slate-300">
+                        {selectedYtChannel.subscriberCount !== undefined && (
+                          <span className="flex items-center gap-1 font-medium font-mono text-slate-200">
+                            <Users className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            {selectedYtChannel.subscriberCount.toLocaleString()} subs
+                          </span>
+                        )}
+                        {selectedYtChannel.videoCount !== undefined && (
+                          <span className="flex items-center gap-1 font-medium font-mono text-slate-200">
+                            <VideoIcon className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            {selectedYtChannel.videoCount.toLocaleString()} videos
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Selector if multiple channels exist */}
+                    {ytChannelsList.length > 1 && (
+                      <div className="w-full sm:w-auto shrink-0 flex flex-col gap-1 mt-2 sm:mt-0">
+                        <label className="text-[9px] uppercase font-bold text-slate-400">Switch Channel</label>
+                        <select
+                          value={selectedYtChannel.id}
+                          onChange={(e) => handleSelectYtChannel(e.target.value)}
+                          className="bg-[#15181e] border border-white/10 text-xs text-white rounded-lg px-2 py-1 outline-none cursor-pointer focus:border-red-500/50"
+                        >
+                          {ytChannelsList.map((channel) => (
+                            <option key={channel.id} value={channel.id}>
+                              {channel.title}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Helpful Warning Banner */}
+                <div className="flex items-start gap-2.5 p-2.5 bg-amber-500/5 border border-amber-500/10 rounded-xl text-left">
+                  <Info className="w-4 h-4 text-amber-500/85 shrink-0 mt-0.5" />
+                  <span className="text-[10px] text-amber-200/80 leading-normal">
+                    <strong>Note:</strong> ARC 5 only connects and reads your YouTube channel metadata. Uploading and automated scheduling features will come in the next ARC release.
+                  </span>
+                </div>
               </div>
 
               {/* MOCK VIDEO INTAKE POPUP / EXPANDED FORM */}
@@ -1695,7 +1907,7 @@ export default function App() {
                   {/* Submitting button adding to upload schedule queue */}
                   <button
                     type="submit"
-                    className="w-full bg-red-650 hover:bg-red-700 active:bg-red-850 text-white font-bold py-2.5 px-4 rounded-xl text-xs transition uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-red-900/10 cursor-pointer"
+                    className="w-full bg-red-600 hover:bg-red-700 active:bg-red-800 text-white font-bold py-2.5 px-4 rounded-xl text-xs transition uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-red-900/10 cursor-pointer"
                   >
                     <Calendar className="w-4 h-4" />
                     <span>Add to Queue & Schedule</span>
