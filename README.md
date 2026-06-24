@@ -1,8 +1,16 @@
-# AutoTube Lite ARC 7 — Single YouTube Upload
+# AutoTube Lite ARC 7.1 — Uploaded State UX Cleanup
 
 AutoTube Lite is a lightweight YouTube Shorts upload and scheduling dashboard.
 
-ARC 7 adds the ability to upload a single ready queue item from Google Drive to YouTube manually.
+ARC 7.1 improves the user experience after a queue item has been uploaded. Instead of treating uploaded videos as blocked/disabled items with errors, ARC 7.1 presents successful uploads as complete, clear achievements while ensuring duplicate uploads are prevented for safety.
+
+## Key Features in ARC 7.1
+
+- **Branded Success Experience**: Uploaded queue cards transition to a distinct, emerald green glowing container with an "Uploaded" success indicator.
+- **Copy Video URL Link**: A copy action button copies the live YouTube video link (`youtube_video_url`) to the user's clipboard and provides a floating feedback toast.
+- **Full-Width Collapsible Readiness Drawer**: Redesigned readiness checker layouts into clean, full-width drawers that present detailed checklists clearly.
+- **"Upload Complete" Readiness Panel**: Replaces error-style "Blocked" alerts with neutral/positive "Upload Complete" panels explaining that duplicate uploads are disabled for safety.
+- **Layout Rhythm Cleanup**: Separated visual video cover previews and scheduling data from action elements, preventing layout shifts or text wrapping on multiple screen sizes.
 
 ## Key Features in ARC 7
 

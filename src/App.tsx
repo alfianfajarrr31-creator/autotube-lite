@@ -41,7 +41,8 @@ import {
   VideoOff,
   XCircle,
   Users,
-  LogOut
+  LogOut,
+  Copy
 } from 'lucide-react';
 import { Video, QueueItem, mapToQueueItem, mapToDbItem } from './types';
 import { checkUploadReadiness } from './utils/uploadReadiness';
@@ -815,6 +816,18 @@ export default function App() {
     runStep();
   };
 
+  const handleCopyLink = (url: string) => {
+    if (!url) return;
+    navigator.clipboard.writeText(url)
+      .then(() => {
+        showNotification("YouTube link copied.", "success");
+      })
+      .catch((err) => {
+        console.error("Could not copy text: ", err);
+        showNotification("Could not copy link. Please copy it manually.", "error");
+      });
+  };
+
   const handleUploadToYouTube = async (item: QueueItem) => {
     // 1. Check readiness level first
     const readiness = getReadinessForItem(item.id);
@@ -1030,7 +1043,7 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-bold font-display tracking-tight text-white">AutoTube Lite</h1>
                 <span className="text-[10px] font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 px-1.5 py-0.5 rounded-md uppercase animate-pulse">
-                  ARC 7 Single Upload
+                  ARC 7.1 Upload UX
                 </span>
               </div>
               <p className="text-xs text-slate-400">Google Drive + YouTube Shorts Scheduler</p>
@@ -1670,18 +1683,27 @@ export default function App() {
                 <div className="flex flex-col gap-3">
                   {queue.map((item) => {
                     const isProcessing = simulationActive && item.progress !== undefined;
+                    const isUploaded = item.status === 'Uploaded';
                     const readiness = getReadinessForItem(item.id);
-                    const readinessLabel = readiness?.level === 'ready' ? 'Ready to Upload' : readiness?.level === 'warning' ? 'Needs Review' : 'Blocked';
-                    const readinessClass = readiness?.level === 'ready'
-                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/20'
-                      : readiness?.level === 'warning'
-                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/20'
-                        : 'bg-rose-500/20 text-rose-300 border-rose-500/20';
+                    const readinessLabel = isUploaded 
+                      ? 'Already Uploaded'
+                      : readiness?.level === 'ready' 
+                        ? 'Ready to Upload' 
+                        : readiness?.level === 'warning' 
+                          ? 'Needs Review' 
+                          : 'Blocked';
+                    const readinessClass = isUploaded
+                      ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
+                      : readiness?.level === 'ready'
+                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/20'
+                        : readiness?.level === 'warning'
+                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/20'
+                          : 'bg-rose-500/20 text-rose-300 border-rose-500/20';
                     
                     return (
                       <div 
                         key={item.id}
-                        className={`p-4 bg-white/5 border border-white/10 rounded-2xl relative transition-all duration-300 flex flex-col md:flex-row md:items-center justify-between gap-4 ${
+                        className={`p-4 bg-white/5 border border-white/10 rounded-2xl relative transition-all duration-300 flex flex-col gap-3 ${
                           isProcessing 
                             ? 'bg-blue-500/5 border-blue-500/40 ring-1 ring-blue-500/20 shadow-lg' 
                             : item.status === 'Uploaded' 
@@ -1689,193 +1711,226 @@ export default function App() {
                               : 'hover:bg-white/[0.08]'
                         }`}
                       >
-                        {/* Video Info Layout */}
-                        <div className="flex items-start gap-3 flex-1 min-w-0">
-                          {/* Mini vertical 9:16 card view representing visual cover icon */}
-                          {(() => {
-                            const [itemGradient, itemText] = item.thumbnail.includes('|||') 
-                              ? item.thumbnail.split('|||') 
-                              : [item.thumbnail, ''];
-                            return (
-                              <div className={`w-10 h-16 rounded-md ${itemGradient} flex flex-col justify-between p-1 text-[8px] font-mono shrink-0 shadow-sm border border-white/10 relative overflow-hidden`}>
-                                {itemText ? (
-                                  <span className="absolute inset-x-0 top-0.5 text-[5px] text-yellow-300 font-extrabold uppercase truncate bg-black/75 px-0.5 text-center leading-normal">
-                                    {itemText}
+                        {/* Upper row: Video Info + Status Action Controls */}
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 w-full">
+                          
+                          {/* Video Info Layout */}
+                          <div className="flex items-start gap-3 flex-1 min-w-0">
+                            {/* Mini vertical 9:16 card view representing visual cover icon */}
+                            {(() => {
+                              const [itemGradient, itemText] = item.thumbnail.includes('|||') 
+                                ? item.thumbnail.split('|||') 
+                                : [item.thumbnail, ''];
+                              return (
+                                <div className={`w-10 h-16 rounded-md ${itemGradient} flex flex-col justify-between p-1 text-[8px] font-mono shrink-0 shadow-sm border border-white/10 relative overflow-hidden`}>
+                                  {itemText ? (
+                                    <span className="absolute inset-x-0 top-0.5 text-[5px] text-yellow-300 font-extrabold uppercase truncate bg-black/75 px-0.5 text-center leading-normal">
+                                      {itemText}
+                                    </span>
+                                  ) : (
+                                    <span className="bg-black/60 text-white rounded px-0.5 self-start text-[6px]">SHORTS</span>
+                                  )}
+                                  <span className="text-[6px] text-white/90 truncate bg-slate-900/45 px-0.5 rounded text-center block max-w-full z-10">
+                                    {item.duration}
                                   </span>
-                                ) : (
-                                  <span className="bg-black/60 text-white rounded px-0.5 self-start text-[6px]">SHORTS</span>
-                                )}
-                                <span className="text-[6px] text-white/90 truncate bg-slate-900/45 px-0.5 rounded text-center block max-w-full z-10">
-                                  {item.duration}
+                                </div>
+                              );
+                            })()}
+
+                            <div className="flex-1 min-w-0">
+                              <h3 className="text-xs font-bold text-white leading-tight truncate pr-6" title={item.youtubeTitle}>
+                                {item.youtubeTitle || '(No Name Title)'}
+                              </h3>
+                              
+                              <p className="text-[10px] text-slate-400 mt-1 truncate">
+                                📁 Original: {item.fileName}
+                              </p>
+
+                              <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                                <span className="text-[9px] font-mono bg-white/10 text-slate-300 px-1.5 py-0.5 rounded flex items-center gap-1 border border-white/5">
+                                  <Calendar className="w-2.5 h-2.5" />
+                                  {item.publishDate}
                                 </span>
+                                <span className="text-[9px] font-mono bg-white/10 text-slate-300 px-1.5 py-0.5 rounded flex items-center gap-1 border border-white/5">
+                                  <Clock className="w-2.5 h-2.5" />
+                                  {item.publishTime}
+                                </span>
+                                <span className="text-[9px] font-mono bg-red-500/10 text-red-300 px-1.5 py-0.5 rounded flex items-center gap-1 border border-red-500/20 uppercase tracking-tighter">
+                                  <Globe className="w-2.5 h-2.5 text-red-400" />
+                                  {item.visibility}
+                                </span>
+                                {readiness && (
+                                  <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded flex items-center gap-1 border uppercase tracking-tighter ${readinessClass}`}>
+                                    {isUploaded ? <CheckCircle className="w-2.5 h-2.5 text-emerald-400" /> : readiness.level === 'ready' ? <CheckCircle className="w-2.5 h-2.5" /> : readiness.level === 'warning' ? <AlertTriangle className="w-2.5 h-2.5" /> : <XCircle className="w-2.5 h-2.5" />}
+                                    {readinessLabel}
+                                  </span>
+                                )}
                               </div>
-                            );
-                          })()}
+                            </div>
+                          </div>
 
-                          <div className="flex-1 min-w-0">
-                            <h3 className="text-xs font-bold text-white leading-tight truncate pr-6" title={item.youtubeTitle}>
-                              {item.youtubeTitle || '(No Name Title)'}
-                            </h3>
+                          {/* Status Progress details & Actions */}
+                          <div className="flex flex-row md:flex-col items-center md:items-end justify-between md:justify-center gap-3 pl-0 md:pl-4 pt-2 md:pt-0 border-t md:border-t-0 border-white/10 min-w-[120px] md:min-w-[160px]">
                             
-                            <p className="text-[10px] text-slate-400 mt-1 truncate">
-                              📁 Original: {item.fileName}
-                            </p>
-
-                            <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-                              <span className="text-[9px] font-mono bg-white/10 text-slate-300 px-1.5 py-0.5 rounded flex items-center gap-1 border border-white/5">
-                                <Calendar className="w-2.5 h-2.5" />
-                                {item.publishDate}
-                              </span>
-                              <span className="text-[9px] font-mono bg-white/10 text-slate-300 px-1.5 py-0.5 rounded flex items-center gap-1 border border-white/5">
-                                <Clock className="w-2.5 h-2.5" />
-                                {item.publishTime}
-                              </span>
-                              <span className="text-[9px] font-mono bg-red-500/10 text-red-300 px-1.5 py-0.5 rounded flex items-center gap-1 border border-red-500/20 uppercase tracking-tighter">
-                                <Globe className="w-2.5 h-2.5 text-red-400" />
-                                {item.visibility}
-                              </span>
-                              {readiness && (
-                                <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded flex items-center gap-1 border uppercase tracking-tighter ${readinessClass}`}>
-                                  {readiness.level === 'ready' ? <CheckCircle className="w-2.5 h-2.5" /> : readiness.level === 'warning' ? <AlertTriangle className="w-2.5 h-2.5" /> : <XCircle className="w-2.5 h-2.5" />}
-                                  {readinessLabel}
+                            {/* Simulated status feedback */}
+                            <div className="flex flex-col items-start md:items-end gap-1 shrink-0">
+                              {uploadingItemId === item.id ? (
+                                <div className="flex flex-col items-start md:items-end gap-1 w-28">
+                                  <span className="text-[9px] px-2 py-0.5 bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded uppercase font-bold flex items-center gap-1 animate-pulse">
+                                    <Activity className="w-3 h-3 text-rose-400 animate-spin" />
+                                    Progress {uploadingPercent}%
+                                  </span>
+                                  <span className="text-[8px] text-slate-400 font-mono text-left md:text-right truncate max-w-[120px]" title={uploadingStep}>
+                                    {uploadingStep}
+                                  </span>
+                                  <div className="w-full bg-white/10 h-1 rounded-full overflow-hidden">
+                                    <div className="bg-rose-500 h-full transition-all duration-300" style={{ width: `${uploadingPercent}%` }}></div>
+                                  </div>
+                                </div>
+                              ) : item.status === 'Uploaded' ? (
+                                <div className="flex flex-col items-start md:items-end gap-1">
+                                  <span className="text-[9px] px-2 py-0.5 bg-green-500/20 text-green-400 border border-green-500/20 rounded uppercase font-bold flex items-center gap-1">
+                                    <CheckCircle className="w-3 h-3" />
+                                    Uploaded
+                                  </span>
+                                </div>
+                              ) : item.status === 'Failed' ? (
+                                <div className="flex flex-col items-start md:items-end gap-1">
+                                  <span className="text-[9px] px-2 py-0.5 bg-red-500/20 text-red-400 border border-red-500/20 rounded uppercase font-bold flex items-center gap-1">
+                                    <AlertTriangle className="w-3 h-3" />
+                                    Failed
+                                  </span>
+                                  {item.uploadError && (
+                                    <span className="text-[8px] text-red-400 font-medium max-w-[130px] text-left md:text-right truncate" title={item.uploadError}>
+                                      {item.uploadError}
+                                    </span>
+                                  )}
+                                </div>
+                              ) : isProcessing ? (
+                                <div className="flex flex-col items-start md:items-end gap-1 w-24">
+                                  <span className="text-[9px] px-2 py-0.5 bg-blue-500/20 text-blue-400 border border-blue-500/20 rounded uppercase font-bold flex items-center gap-1">
+                                    <Activity className="w-3 h-3 text-blue-400 animate-pulse" />
+                                    Uploading {item.progress}%
+                                  </span>
+                                  <div className="w-full bg-white/10 h-1 rounded-full overflow-hidden">
+                                    <div className="bg-blue-500 h-full transition-all duration-300" style={{ width: `${item.progress}%` }}></div>
+                                  </div>
+                                </div>
+                              ) : (
+                                <span className="text-[9px] px-2 py-0.5 bg-yellow-500/20 text-yellow-500 border border-yellow-500/20 rounded uppercase font-bold flex items-center gap-1">
+                                  <Clock className="w-3 h-3" />
+                                  Scheduled
                                 </span>
                               )}
                             </div>
+
+                            {/* Action buttons */}
+                            {!simulationActive && uploadingItemId !== item.id && (
+                              <div className="flex items-center md:items-end gap-1.5 flex-wrap justify-end">
+                                {item.status === 'Uploaded' && item.youtubeVideoUrl && (
+                                  <div className="flex items-center md:items-end gap-1 flex-wrap justify-end">
+                                    <a
+                                      href={item.youtubeVideoUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="px-2 py-1 text-[10px] text-emerald-300 hover:text-white bg-emerald-500/10 hover:bg-emerald-500/25 border border-emerald-500/20 rounded-lg transition flex items-center gap-1 cursor-pointer"
+                                    >
+                                      <Youtube className="w-3 h-3 text-emerald-400 shrink-0" />
+                                      <span>View Video</span>
+                                    </a>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCopyLink(item.youtubeVideoUrl!)}
+                                      className="px-2 py-1 text-[10px] text-sky-300 hover:text-white bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/20 rounded-lg transition flex items-center gap-1 cursor-pointer"
+                                      title="Copy YouTube video link"
+                                    >
+                                      <Copy className="w-3 h-3 text-sky-400 shrink-0" />
+                                      <span>Copy Link</span>
+                                    </button>
+                                  </div>
+                                )}
+                                
+                                {item.status !== 'Uploaded' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUploadToYouTube(item)}
+                                    disabled={uploadingItemId !== null || readiness?.level === 'blocked'}
+                                    className="px-2 py-1 text-[10px] text-rose-300 hover:text-white bg-rose-500/10 hover:bg-rose-500/25 border border-rose-500/20 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition flex items-center gap-1 cursor-pointer"
+                                    title={readiness?.level === 'blocked' ? "Resolve blocked issues first" : "Upload to YouTube now"}
+                                  >
+                                    <Youtube className="w-3 h-3 text-rose-400 shrink-0 animate-pulse" />
+                                    <span>Upload to YouTube</span>
+                                  </button>
+                                )}
+
+                                <button
+                                  type="button"
+                                  onClick={() => setReadinessOpenId(readinessOpenId === item.id ? null : item.id)}
+                                  className="px-2 py-1 text-[10px] text-sky-300 hover:text-white bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/20 rounded-lg transition flex items-center gap-1 cursor-pointer"
+                                  title="Check upload readiness"
+                                >
+                                  <Search className="w-3 h-3" />
+                                  <span>Check Readiness</span>
+                                </button>
+                                
+                                <button
+                                  onClick={() => handleRemoveFromQueue(item.id, item.videoId)}
+                                  className="p-1 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded transition text-xs flex items-center gap-1 cursor-pointer"
+                                  title="Delete from schedule queue"
+                                >
+                                  <X className="w-4 h-4" />
+                                  <span className="md:hidden text-[10px]">Remove</span>
+                                </button>
+                              </div>
+                            )}
+
                           </div>
+
                         </div>
 
+                        {/* Lower row: Expanded Readiness detail block */}
                         {readinessOpenId === item.id && readiness && (
-                          <div className="md:col-span-2 w-full bg-black/35 border border-white/10 rounded-xl p-3 text-[10px] text-left">
+                          <div className="w-full bg-black/35 border border-white/10 rounded-xl p-3 text-[10px] text-left mt-2">
                             <div className="font-bold text-white mb-2 flex items-center gap-1.5">
-                              {readiness.level === 'ready' ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> : readiness.level === 'warning' ? <AlertTriangle className="w-3.5 h-3.5 text-amber-400" /> : <XCircle className="w-3.5 h-3.5 text-rose-400" />}
+                              {isUploaded ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> : readiness.level === 'ready' ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> : readiness.level === 'warning' ? <AlertTriangle className="w-3.5 h-3.5 text-amber-400" /> : <XCircle className="w-3.5 h-3.5 text-rose-400" />}
                               Upload Readiness: {readinessLabel}
                             </div>
                             {selectedYtChannel && (
                               <p className="text-slate-400 mb-2">Target channel: <span className="text-slate-200 font-semibold">{selectedYtChannel.title}</span></p>
                             )}
-                            {readiness.issues.length > 0 && (
-                              <div className="mb-2">
-                                <p className="text-rose-300 font-bold uppercase tracking-wider mb-1">Blocked issues</p>
-                                <ul className="list-disc list-inside space-y-0.5 text-rose-200/90">
-                                  {readiness.issues.map((issue, index) => <li key={`issue-${item.id}-${index}`}>{issue}</li>)}
+                            {isUploaded ? (
+                              <div className="mb-1">
+                                <p className="text-emerald-300 font-bold uppercase tracking-wider mb-1">Upload Complete</p>
+                                <ul className="list-disc list-inside space-y-0.5 text-emerald-100/90 font-medium">
+                                  <li>Uploaded successfully.</li>
+                                  <li>This video has already been uploaded to YouTube. Duplicate uploads are disabled for safety.</li>
                                 </ul>
                               </div>
-                            )}
-                            {readiness.warnings.length > 0 && (
-                              <div>
-                                <p className="text-amber-300 font-bold uppercase tracking-wider mb-1">Warnings</p>
-                                <ul className="list-disc list-inside space-y-0.5 text-amber-100/90">
-                                  {readiness.warnings.map((warning, index) => <li key={`warning-${item.id}-${index}`}>{warning}</li>)}
-                                </ul>
-                              </div>
-                            )}
-                            {readiness.issues.length === 0 && readiness.warnings.length === 0 && (
-                              <p className="text-emerald-200">No blocked issues or warnings found. This item is ready for the next upload ARC.</p>
+                            ) : (
+                              <>
+                                {readiness.issues.length > 0 && (
+                                  <div className="mb-2">
+                                    <p className="text-rose-300 font-bold uppercase tracking-wider mb-1">Blocked issues</p>
+                                    <ul className="list-disc list-inside space-y-0.5 text-rose-200/90">
+                                      {readiness.issues.map((issue, index) => <li key={`issue-${item.id}-${index}`}>{issue}</li>)}
+                                    </ul>
+                                  </div>
+                                )}
+                                {readiness.warnings.length > 0 && (
+                                  <div>
+                                    <p className="text-amber-300 font-bold uppercase tracking-wider mb-1">Warnings</p>
+                                    <ul className="list-disc list-inside space-y-0.5 text-amber-100/90">
+                                      {readiness.warnings.map((warning, index) => <li key={`warning-${item.id}-${index}`}>{warning}</li>)}
+                                    </ul>
+                                  </div>
+                                )}
+                                {readiness.issues.length === 0 && readiness.warnings.length === 0 && (
+                                  <p className="text-emerald-200">No blocked issues or warnings found. This item is ready for the next upload ARC.</p>
+                                )}
+                              </>
                             )}
                           </div>
                         )}
-
-                        {/* Status Progress details & Remove Option */}
-                        <div className="flex md:flex-col items-end justify-between md:justify-center gap-2 md:gap-1 pl-4 md:pl-0 pt-2 md:pt-0 border-t md:border-t-0 border-white/10">
-                          
-                          {/* Simulated status feedback */}
-                          <div className="flex flex-col items-end gap-1">
-                            {uploadingItemId === item.id ? (
-                              <div className="flex flex-col items-end gap-1 w-28">
-                                <span className="text-[9px] px-2 py-0.5 bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded uppercase font-bold flex items-center gap-1 animate-pulse">
-                                  <Activity className="w-3 h-3 text-rose-400 animate-spin" />
-                                  Progress {uploadingPercent}%
-                                </span>
-                                <span className="text-[8px] text-slate-400 font-mono text-right truncate max-w-[120px]" title={uploadingStep}>
-                                  {uploadingStep}
-                                </span>
-                                <div className="w-full bg-white/10 h-1 rounded-full overflow-hidden">
-                                  <div className="bg-rose-500 h-full transition-all duration-300" style={{ width: `${uploadingPercent}%` }}></div>
-                                </div>
-                              </div>
-                            ) : item.status === 'Uploaded' ? (
-                              <div className="flex flex-col items-end gap-1">
-                                <span className="text-[9px] px-2 py-0.5 bg-green-500/20 text-green-400 border border-green-500/20 rounded uppercase font-bold flex items-center gap-1">
-                                  <CheckCircle className="w-3 h-3" />
-                                  Uploaded
-                                </span>
-                                {item.youtubeVideoUrl && (
-                                  <a
-                                    href={item.youtubeVideoUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-[9px] text-sky-400 hover:text-sky-300 underline font-mono flex items-center gap-1 mt-0.5"
-                                  >
-                                    <Youtube className="w-2.5 h-2.5 shrink-0" />
-                                    <span>View Video</span>
-                                  </a>
-                                )}
-                              </div>
-                            ) : item.status === 'Failed' ? (
-                              <div className="flex flex-col items-end gap-1">
-                                <span className="text-[9px] px-2 py-0.5 bg-red-500/20 text-red-400 border border-red-500/20 rounded uppercase font-bold flex items-center gap-1">
-                                  <AlertTriangle className="w-3 h-3" />
-                                  Failed
-                                </span>
-                                {item.uploadError && (
-                                  <span className="text-[8px] text-red-400 font-medium max-w-[130px] text-right truncate" title={item.uploadError}>
-                                    {item.uploadError}
-                                  </span>
-                                )}
-                              </div>
-                            ) : isProcessing ? (
-                              <div className="flex flex-col items-end gap-1 w-24">
-                                <span className="text-[9px] px-2 py-0.5 bg-blue-500/20 text-blue-400 border border-blue-500/20 rounded uppercase font-bold flex items-center gap-1">
-                                  <Activity className="w-3 h-3 text-blue-400 animate-pulse" />
-                                  Uploading {item.progress}%
-                                </span>
-                                <div className="w-full bg-white/10 h-1 rounded-full overflow-hidden">
-                                  <div className="bg-blue-500 h-full transition-all duration-300" style={{ width: `${item.progress}%` }}></div>
-                                </div>
-                              </div>
-                            ) : (
-                              <span className="text-[9px] px-2 py-0.5 bg-yellow-500/20 text-yellow-500 border border-yellow-500/20 rounded uppercase font-bold flex items-center gap-1">
-                                <Clock className="w-3 h-3" />
-                                Scheduled
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Action button */}
-                          {!simulationActive && uploadingItemId !== item.id && (
-                            <div className="flex md:flex-col items-end gap-1">
-                              {item.status !== 'Uploaded' && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleUploadToYouTube(item)}
-                                  disabled={uploadingItemId !== null || readiness?.level === 'blocked'}
-                                  className="px-2 py-1 text-[10px] text-rose-300 hover:text-white bg-rose-500/10 hover:bg-rose-500/25 border border-rose-500/20 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition flex items-center gap-1 cursor-pointer"
-                                  title={readiness?.level === 'blocked' ? "Resolve blocked issues first" : "Upload to YouTube now"}
-                                >
-                                  <Youtube className="w-3 h-3 text-rose-400 shrink-0 animate-pulse" />
-                                  <span>Upload to YouTube</span>
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                onClick={() => setReadinessOpenId(readinessOpenId === item.id ? null : item.id)}
-                                className="px-2 py-1 text-[10px] text-sky-300 hover:text-white bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/20 rounded-lg transition flex items-center gap-1 cursor-pointer"
-                                title="Check upload readiness"
-                              >
-                                <Search className="w-3 h-3" />
-                                <span>Check Readiness</span>
-                              </button>
-                              <button
-                                onClick={() => handleRemoveFromQueue(item.id, item.videoId)}
-                                className="p-1 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded transition text-xs flex items-center gap-1 cursor-pointer"
-                                title="Delete from schedule queue"
-                              >
-                                <X className="w-4 h-4" />
-                                <span className="md:hidden text-[10px]">Remove</span>
-                              </button>
-                            </div>
-                          )}
-                        </div>
 
                       </div>
                     );
