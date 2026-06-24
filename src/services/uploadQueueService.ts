@@ -56,6 +56,32 @@ export async function deleteUploadQueueItem(id: string): Promise<void> {
   }
 }
 
+export async function updateUploadQueueItem(
+  id: string,
+  payload: Partial<Omit<UploadQueueItem, 'id' | 'created_at'>>
+): Promise<UploadQueueItem> {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error('Supabase is not configured.');
+  }
+
+  const { data, error } = await supabase
+    .from('upload_queue')
+    .update({
+      ...payload,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error updating upload queue item:', error);
+    throw new Error(`Failed to update queue item: ${error.message}`);
+  }
+
+  return data as UploadQueueItem;
+}
+
 export async function updateUploadQueueStatus(
   id: string,
   status: 'Draft' | 'Scheduled' | 'Uploaded' | 'Failed'

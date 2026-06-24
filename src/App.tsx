@@ -43,7 +43,8 @@ import {
   Users,
   LogOut,
   Copy,
-  History
+  History,
+  Edit
 } from 'lucide-react';
 import { Video, QueueItem, mapToQueueItem, mapToDbItem } from './types';
 import { checkUploadReadiness } from './utils/uploadReadiness';
@@ -62,6 +63,7 @@ import {
   addUploadQueueItem,
   deleteUploadQueueItem,
   updateUploadQueueStatus,
+  updateUploadQueueItem,
   clearUploadQueue,
   markQueueItemUploaded,
   markQueueItemUploadFailed,
@@ -168,6 +170,27 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('weeklyShortsTarget', String(weeklyShortsTarget));
   }, [weeklyShortsTarget]);
+
+  // ARC 12 Queue Management states
+  const [queueFilter, setQueueFilter] = useState<'All' | 'Scheduled' | 'Uploaded' | 'Failed' | 'Missing Schedule' | 'Ready' | 'Needs Review' | 'Blocked'>('All');
+  const [queueSort, setQueueSort] = useState<'Newest First' | 'Oldest First' | 'Publish Date Asc' | 'Publish Date Desc' | 'Status'>('Publish Date Asc');
+  const [hideUploaded, setHideUploaded] = useState<boolean>(() => {
+    const saved = localStorage.getItem('hideUploaded');
+    return saved !== 'false';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('hideUploaded', String(hideUploaded));
+  }, [hideUploaded]);
+
+  const [editingItem, setEditingItem] = useState<QueueItem | null>(null);
+  const [editYtTitle, setEditYtTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editHashtags, setEditHashtags] = useState('');
+  const [editThumbnailText, setEditThumbnailText] = useState('');
+  const [editVisibility, setEditVisibility] = useState<'Private' | 'Unlisted' | 'Public'>('Public');
+  const [editPublishDate, setEditPublishDate] = useState('');
+  const [editPublishTime, setEditPublishTime] = useState('');
 
   // Quick form state for "Creating own custom mocked Video"
   const [isAddMockOpen, setIsAddMockOpen] = useState(false);
@@ -496,6 +519,63 @@ export default function App() {
     });
   }, [queue, historyFilter, historySearch]);
 
+  // Computed filtered & sorted queue items (ARC 12)
+  const filteredSortedQueue = useMemo(() => {
+    let result = [...queue];
+
+    // Hide Uploaded toggle
+    if (hideUploaded) {
+      result = result.filter(item => item.status !== 'Uploaded');
+    }
+
+    // Queue Filter
+    result = result.filter(item => {
+      if (queueFilter === 'All') return true;
+      if (queueFilter === 'Scheduled') return item.status === 'Scheduled';
+      if (queueFilter === 'Uploaded') return item.status === 'Uploaded';
+      if (queueFilter === 'Failed') return item.status === 'Failed';
+      if (queueFilter === 'Missing Schedule') return !item.publishDate || !item.publishTime;
+      
+      const readiness = readinessResults.find(entry => entry.item.id === item.id)?.result;
+      if (queueFilter === 'Ready') return readiness?.level === 'ready';
+      if (queueFilter === 'Needs Review') return readiness?.level === 'warning';
+      if (queueFilter === 'Blocked') return readiness?.level === 'blocked';
+      return true;
+    });
+
+    // Queue Sort
+    result.sort((a, b) => {
+      if (queueSort === 'Newest First') {
+        return b.id.localeCompare(a.id);
+      }
+      if (queueSort === 'Oldest First') {
+        return a.id.localeCompare(b.id);
+      }
+      if (queueSort === 'Publish Date Asc') {
+        if (!a.publishDate && !b.publishDate) return 0;
+        if (!a.publishDate) return 1;
+        if (!b.publishDate) return -1;
+        const dateCompare = a.publishDate.localeCompare(b.publishDate);
+        if (dateCompare !== 0) return dateCompare;
+        return (a.publishTime || '').localeCompare(b.publishTime || '');
+      }
+      if (queueSort === 'Publish Date Desc') {
+        if (!a.publishDate && !b.publishDate) return 0;
+        if (!a.publishDate) return 1;
+        if (!b.publishDate) return -1;
+        const dateCompare = b.publishDate.localeCompare(a.publishDate);
+        if (dateCompare !== 0) return dateCompare;
+        return (b.publishTime || '').localeCompare(a.publishTime || '');
+      }
+      if (queueSort === 'Status') {
+        return a.status.localeCompare(b.status);
+      }
+      return 0;
+    });
+
+    return result;
+  }, [queue, queueFilter, queueSort, hideUploaded, readinessResults]);
+
   // ARC 11 Schedule Planning computations
   const todayStr = useMemo(() => {
     const d = new Date();
@@ -814,6 +894,16 @@ export default function App() {
   };
 
   const handleRemoveFromQueue = async (itemId: string, videoId: string) => {
+    const item = queue.find(q => q.id === itemId);
+    const isUploaded = item?.status === 'Uploaded';
+    const message = isUploaded
+      ? "This item is already uploaded. Removing it only removes the queue record, not the YouTube video."
+      : "Remove this queue item from AutoTube Lite? This will not delete the Google Drive file or YouTube video.";
+
+    if (!window.confirm(message)) {
+      return;
+    }
+
     if (isSupabaseConfigured) {
       try {
         await deleteUploadQueueItem(itemId);
@@ -866,6 +956,117 @@ export default function App() {
       console.error("Error removing Drive video:", err);
       showNotification(`Failed to remove Drive video: ${err.message}`, 'error');
     }
+  };
+
+  // ARC 12 Queue Management handlers
+  const handleStartEdit = (item: QueueItem) => {
+    setEditingItem(item);
+    setEditYtTitle(item.youtubeTitle || '');
+    setEditDescription(item.description || '');
+    setEditHashtags(item.hashtags || '');
+    
+    const [gradient, text] = item.thumbnail.includes('|||')
+      ? item.thumbnail.split('|||')
+      : [item.thumbnail, ''];
+    setEditThumbnailText(text || '');
+    setEditVisibility(item.visibility || 'Public');
+    setEditPublishDate(item.publishDate || '');
+    setEditPublishTime(item.publishTime || '');
+  };
+
+  const handleSaveEditItem = async () => {
+    if (!editingItem) return;
+
+    const [gradient] = editingItem.thumbnail.includes('|||')
+      ? editingItem.thumbnail.split('|||')
+      : [editingItem.thumbnail, ''];
+
+    const newThumbnail = editThumbnailText ? `${gradient}|||${editThumbnailText}` : gradient;
+
+    const updatedItem: QueueItem = {
+      ...editingItem,
+      youtubeTitle: editYtTitle,
+      description: editDescription,
+      hashtags: editHashtags,
+      thumbnail: newThumbnail,
+      visibility: editVisibility,
+      publishDate: editPublishDate,
+      publishTime: editPublishTime,
+    };
+
+    if (isSupabaseConfigured) {
+      try {
+        const payload = mapToDbItem(updatedItem);
+        await updateUploadQueueItem(editingItem.id, payload);
+
+        setQueue(prev => prev.map(q => q.id === editingItem.id ? updatedItem : q));
+        showNotification(`Successfully updated "${editYtTitle}" metadata!`);
+        setEditingItem(null);
+      } catch (err: any) {
+        showNotification(`Database error: ${err.message}`, 'error');
+      }
+    } else {
+      setQueue(prev => prev.map(q => q.id === editingItem.id ? updatedItem : q));
+      showNotification(`Successfully updated "${editYtTitle}" metadata!`);
+      setEditingItem(null);
+    }
+  };
+
+  const handleDuplicateQueueItem = async (item: QueueItem) => {
+    if (!window.confirm("Duplicate this queue item?")) {
+      return;
+    }
+
+    const newId = `q-${Date.now()}`;
+    const duplicatedItem: QueueItem = {
+      ...item,
+      id: newId,
+      youtubeTitle: item.youtubeTitle ? `${item.youtubeTitle} Copy` : 'Copy',
+      status: 'Scheduled',
+      youtubeVideoId: null,
+      youtubeVideoUrl: null,
+      uploadedAt: null,
+      uploadError: null,
+    };
+
+    if (isSupabaseConfigured) {
+      try {
+        const payload = mapToDbItem(duplicatedItem);
+        await addUploadQueueItem(payload);
+        setQueue(prev => [...prev, duplicatedItem]);
+        showNotification(`Successfully duplicated queue item: "${duplicatedItem.youtubeTitle}"`);
+      } catch (err: any) {
+        showNotification(`Database error: ${err.message}`, 'error');
+      }
+    } else {
+      setQueue(prev => [...prev, duplicatedItem]);
+      showNotification(`Successfully duplicated queue item: "${duplicatedItem.youtubeTitle}"`);
+    }
+  };
+
+  const handleSelectReadyItems = () => {
+    const readyIds = queue
+      .filter(item => {
+        const check = isItemSelectable(item);
+        const readiness = getReadinessForItem(item.id);
+        return check.selectable && readiness?.level === 'ready';
+      })
+      .map(item => item.id);
+    
+    setSelectedQueueIds(readyIds.slice(0, 3));
+    showNotification(`Selected ${Math.min(3, readyIds.length)} ready items for batch upload.`);
+  };
+
+  const handleSelectFailedItems = () => {
+    const failedIds = queue
+      .filter(item => {
+        const check = isItemSelectable(item);
+        return check.selectable && item.status === 'Failed';
+      })
+      .map(item => item.id);
+    
+    setSelectedQueueIds(failedIds.slice(0, 3));
+    showNotification(`Selected ${Math.min(3, failedIds.length)} failed items for batch upload retry.`);
   };
 
   // Real-time Upload & Scheduler simulation trigger
@@ -1416,7 +1617,7 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-bold font-display tracking-tight text-white">AutoTube Lite</h1>
                 <span className="text-[10px] font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 px-1.5 py-0.5 rounded-md uppercase animate-pulse">
-                  ARC 11 Schedule Planning
+                  ARC 12 Queue Polish
                 </span>
               </div>
               <p className="text-xs text-slate-400">Google Drive + YouTube Shorts Scheduler</p>
@@ -2093,15 +2294,36 @@ export default function App() {
                         </label>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        disabled={selectedQueueIds.length === 0 || batchUploadActive}
-                        onClick={() => setSelectedQueueIds([])}
-                        className="px-2.5 py-1.5 text-xs text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-xl transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        Clear Selection
-                      </button>
+                    <div className="flex items-center justify-between w-full flex-wrap gap-3">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <button
+                          type="button"
+                          disabled={selectedQueueIds.length === 0 || batchUploadActive}
+                          onClick={() => setSelectedQueueIds([])}
+                          className="px-2.5 py-1.5 text-xs text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-xl transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          Clear Selection
+                        </button>
+                        <button
+                          type="button"
+                          disabled={batchUploadActive}
+                          onClick={handleSelectReadyItems}
+                          className="px-2.5 py-1.5 text-xs text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 rounded-xl transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed font-semibold"
+                          title="Select up to 3 Ready items for batch upload"
+                        >
+                          Select Ready
+                        </button>
+                        <button
+                          type="button"
+                          disabled={batchUploadActive}
+                          onClick={handleSelectFailedItems}
+                          className="px-2.5 py-1.5 text-xs text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 rounded-xl transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed font-semibold"
+                          title="Select up to 3 Failed items for batch retry"
+                        >
+                          Select Failed
+                        </button>
+                      </div>
+
                       <button
                         type="button"
                         onClick={handleStartBatchUpload}
@@ -2173,12 +2395,109 @@ export default function App() {
                   </div>
                   <p className="text-sm font-semibold text-slate-200">Queue is empty</p>
                   <p className="text-xs text-slate-400 max-w-sm mt-1">
-                    Your upload queue is empty. Add videos after filling metadata and schedule.
+                    Your upload queue is empty. Add videos from Drive Bank after filling metadata and schedule.
                   </p>
                 </div>
               ) : (
-                <div className="flex flex-col gap-3">
-                  {queue.map((item) => {
+                <>
+                  {/* Queue Filters, Sorting and Preferences Section */}
+                  <div className="flex flex-col gap-3.5 bg-white/[0.02] border border-white/10 p-4 rounded-2xl animate-fadeIn">
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                      {/* Filters selector */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Queue Filter:</span>
+                        <div className="flex flex-wrap items-center gap-1.5 bg-black/25 p-1 rounded-xl border border-white/5">
+                          {(['All', 'Scheduled', 'Uploaded', 'Failed', 'Missing Schedule', 'Ready', 'Needs Review', 'Blocked'] as const).map((filterOpt) => {
+                            let count = 0;
+                            if (filterOpt === 'All') count = queue.length;
+                            else if (filterOpt === 'Scheduled') count = queue.filter(q => q.status === 'Scheduled').length;
+                            else if (filterOpt === 'Uploaded') count = queue.filter(q => q.status === 'Uploaded').length;
+                            else if (filterOpt === 'Failed') count = queue.filter(q => q.status === 'Failed').length;
+                            else if (filterOpt === 'Missing Schedule') count = queue.filter(q => !q.publishDate || !q.publishTime).length;
+                            else {
+                              count = queue.filter(q => {
+                                const checkReadiness = getReadinessForItem(q.id);
+                                if (filterOpt === 'Ready') return checkReadiness?.level === 'ready';
+                                if (filterOpt === 'Needs Review') return checkReadiness?.level === 'warning';
+                                if (filterOpt === 'Blocked') return checkReadiness?.level === 'blocked';
+                                return false;
+                              }).length;
+                            }
+
+                            return (
+                              <button
+                                key={filterOpt}
+                                type="button"
+                                onClick={() => setQueueFilter(filterOpt)}
+                                className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
+                                  queueFilter === filterOpt
+                                    ? 'bg-rose-500 text-white shadow-md'
+                                    : 'text-slate-400 hover:text-white hover:bg-white/5'
+                                }`}
+                              >
+                                <span>{filterOpt}</span>
+                                <span className={`text-[9px] font-bold font-mono px-1.5 py-0.2 rounded-full ${
+                                  queueFilter === filterOpt ? 'bg-white/20 text-white' : 'bg-white/10 text-slate-300'
+                                }`}>{count}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Sorting selector */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Sort By:</span>
+                        <select
+                          value={queueSort}
+                          onChange={(e) => setQueueSort(e.target.value as any)}
+                          className="bg-black/40 border border-white/15 text-xs text-white rounded-lg px-2.5 py-1.5 focus:border-rose-500/50 outline-none transition cursor-pointer"
+                        >
+                          <option value="Publish Date Asc" className="bg-[#15181e] text-white">Publish Date Asc</option>
+                          <option value="Publish Date Desc" className="bg-[#15181e] text-white">Publish Date Desc</option>
+                          <option value="Newest First" className="bg-[#15181e] text-white">Newest First</option>
+                          <option value="Oldest First" className="bg-[#15181e] text-white">Oldest First</option>
+                          <option value="Status" className="bg-[#15181e] text-white">Status</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4 pt-2.5 border-t border-white/5 flex-wrap">
+                      {/* Preference Toggle: Hide Uploaded */}
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id="hideUploadedQueue"
+                          checked={hideUploaded}
+                          onChange={(e) => setHideUploaded(e.target.checked)}
+                          className="w-4 h-4 rounded border-white/25 text-rose-500 focus:ring-rose-500/20 focus:ring-offset-0 bg-black/20 cursor-pointer"
+                        />
+                        <label htmlFor="hideUploadedQueue" className="text-[10px] font-bold uppercase tracking-wider text-slate-400 select-none cursor-pointer hover:text-white transition">
+                          Hide Uploaded items from active queue
+                        </label>
+                      </div>
+
+                      <span className="text-[9px] text-slate-400 font-mono">
+                        Showing <span className="text-white font-bold">{filteredSortedQueue.length}</span> of <span className="text-white font-bold">{queue.length}</span> total items
+                      </span>
+                    </div>
+                  </div>
+
+                  {filteredSortedQueue.length === 0 ? (
+                    <div className="text-center py-12 px-4 bg-black/20 border border-white/10 rounded-2xl flex flex-col items-center">
+                      <div className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 mb-3">
+                        <Search className="w-5 h-5" />
+                      </div>
+                      <p className="text-sm font-semibold text-slate-200">No queue items match this filter.</p>
+                      {hideUploaded && queue.some(q => q.status === 'Uploaded') && (
+                        <p className="text-xs text-slate-400 max-w-sm mt-1.5 leading-normal text-center">
+                          Uploaded items are hidden from the working queue. You can view them in Upload History.
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      {filteredSortedQueue.map((item) => {
                     const isProcessing = simulationActive && item.progress !== undefined;
                     const isUploaded = item.status === 'Uploaded';
                     const readiness = getReadinessForItem(item.id);
@@ -2197,6 +2516,126 @@ export default function App() {
                           ? 'bg-amber-500/20 text-amber-300 border-amber-500/20'
                           : 'bg-rose-500/20 text-rose-300 border-rose-500/20';
                     
+                    if (editingItem?.id === item.id) {
+                      return (
+                        <div 
+                          key={`edit-mode-${item.id}`}
+                          className="p-5 bg-[#151214] border border-rose-500/30 rounded-2xl flex flex-col gap-4 animate-fadeIn"
+                        >
+                          <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                            <span className="text-xs font-bold uppercase text-rose-400 font-mono flex items-center gap-1">
+                              <Edit className="w-3.5 h-3.5" />
+                              Edit Queue Item Metadata
+                            </span>
+                            <span className="text-[10px] font-mono text-slate-400">ID: {item.id}</span>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {/* YT Title */}
+                            <div className="flex flex-col">
+                              <label className="text-[9px] uppercase font-bold text-slate-400 mb-1">YouTube Title</label>
+                              <input
+                                type="text"
+                                value={editYtTitle}
+                                onChange={(e) => setEditYtTitle(e.target.value.slice(0, 100))}
+                                className="bg-black/40 border border-white/15 focus:border-rose-500/50 rounded-xl px-3 py-2 text-xs text-white outline-none transition"
+                                placeholder="Short title..."
+                              />
+                              <span className="text-[9px] text-slate-500 text-right mt-0.5">{editYtTitle.length}/100</span>
+                            </div>
+
+                            {/* Visibility */}
+                            <div className="flex flex-col">
+                              <label className="text-[9px] uppercase font-bold text-slate-400 mb-1">Visibility</label>
+                              <select
+                                value={editVisibility}
+                                onChange={(e) => setEditVisibility(e.target.value as any)}
+                                className="bg-black/40 border border-white/15 focus:border-rose-500/50 rounded-xl px-3 py-2 text-xs text-white outline-none transition cursor-pointer"
+                              >
+                                <option value="Public" className="bg-[#15181e] text-white">Public (Recommended for Shorts)</option>
+                                <option value="Unlisted" className="bg-[#15181e] text-white">Unlisted</option>
+                                <option value="Private" className="bg-[#15181e] text-white">Private</option>
+                              </select>
+                            </div>
+
+                            {/* Description */}
+                            <div className="col-span-1 md:col-span-2 flex flex-col">
+                              <label className="text-[9px] uppercase font-bold text-slate-400 mb-1">YouTube Description</label>
+                              <textarea
+                                value={editDescription}
+                                onChange={(e) => setEditDescription(e.target.value)}
+                                className="bg-black/40 border border-white/15 focus:border-rose-500/50 rounded-xl px-3 py-2 text-xs text-white outline-none transition h-20 resize-none"
+                                placeholder="Video description..."
+                              />
+                            </div>
+
+                            {/* Hashtags */}
+                            <div className="flex flex-col">
+                              <label className="text-[9px] uppercase font-bold text-slate-400 mb-1">Hashtags (Space separated)</label>
+                              <input
+                                type="text"
+                                value={editHashtags}
+                                onChange={(e) => setEditHashtags(e.target.value)}
+                                className="bg-black/40 border border-white/15 focus:border-rose-500/50 rounded-xl px-3 py-2 text-xs text-white outline-none transition"
+                                placeholder="#shorts #viral..."
+                              />
+                            </div>
+
+                            {/* Thumbnail Overlay Text */}
+                            <div className="flex flex-col">
+                              <label className="text-[9px] uppercase font-bold text-slate-400 mb-1">Thumbnail Overlay Text</label>
+                              <input
+                                type="text"
+                                value={editThumbnailText}
+                                onChange={(e) => setEditThumbnailText(e.target.value)}
+                                className="bg-black/40 border border-white/15 focus:border-rose-500/50 rounded-xl px-3 py-2 text-xs text-white outline-none transition"
+                                placeholder="Impactful text..."
+                              />
+                            </div>
+
+                            {/* Publish Date */}
+                            <div className="flex flex-col">
+                              <label className="text-[9px] uppercase font-bold text-slate-400 mb-1">Publish Date</label>
+                              <input
+                                type="date"
+                                value={editPublishDate}
+                                onChange={(e) => setEditPublishDate(e.target.value)}
+                                className="bg-black/40 border border-white/15 focus:border-rose-500/50 rounded-xl px-3 py-2 text-xs text-white outline-none transition"
+                              />
+                            </div>
+
+                            {/* Publish Time */}
+                            <div className="flex flex-col">
+                              <label className="text-[9px] uppercase font-bold text-slate-400 mb-1">Publish Time</label>
+                              <input
+                                type="time"
+                                value={editPublishTime}
+                                onChange={(e) => setEditPublishTime(e.target.value)}
+                                className="bg-black/40 border border-white/15 focus:border-rose-500/50 rounded-xl px-3 py-2 text-xs text-white outline-none transition"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex justify-end gap-2.5 pt-3 border-t border-white/5">
+                            <button
+                              type="button"
+                              onClick={() => setEditingItem(null)}
+                              className="px-3.5 py-2 border border-white/10 text-xs font-semibold rounded-xl text-slate-300 hover:text-white hover:bg-white/5 transition"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleSaveEditItem}
+                              className="px-4 py-2 bg-rose-500 hover:bg-rose-600 font-bold text-xs rounded-xl text-white transition active:scale-95 shadow-md"
+                            >
+                              Save Changes
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    }
+
                     return (
                       <div 
                         key={item.id}
@@ -2401,6 +2840,30 @@ export default function App() {
                                   </button>
                                 )}
 
+                                {item.status !== 'Uploaded' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStartEdit(item)}
+                                    className="px-2 py-1 text-[10px] text-amber-300 hover:text-white bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 rounded-lg transition flex items-center gap-1 cursor-pointer"
+                                    title="Edit metadata in place"
+                                  >
+                                    <Edit className="w-3 h-3 text-amber-400 shrink-0" />
+                                    <span>Edit</span>
+                                  </button>
+                                )}
+
+                                {item.status !== 'Uploaded' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDuplicateQueueItem(item)}
+                                    className="px-2 py-1 text-[10px] text-purple-300 hover:text-white bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 rounded-lg transition flex items-center gap-1 cursor-pointer"
+                                    title="Duplicate queue item"
+                                  >
+                                    <Copy className="w-3 h-3 text-purple-400 shrink-0" />
+                                    <span>Duplicate</span>
+                                  </button>
+                                )}
+
                                 <button
                                   type="button"
                                   onClick={() => setReadinessOpenId(readinessOpenId === item.id ? null : item.id)}
@@ -2473,7 +2936,9 @@ export default function App() {
                       </div>
                     );
                   })}
-                </div>
+                    </div>
+                  )}
+                </>
               )}
             </section>
 

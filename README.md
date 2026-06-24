@@ -1,25 +1,26 @@
-# AutoTube Lite ARC 11 — Schedule Planning Mode
+# AutoTube Lite ARC 12 — Queue Management Polish
 
 AutoTube Lite is a lightweight YouTube Shorts upload and scheduling dashboard.
 
-ARC 11 adds an interactive Schedule Planning view that groups and filters planned YouTube Shorts uploads by publication date, allowing users to organize their weekly posting density, track goals, and catch timing conflicts before manual publishing.
+ARC 12 adds comprehensive queue management controls allowing users to filter, sort, search, duplicate, edit-in-place, and execute bulk-selections on scheduled items, keeping workflows efficient even with high-volume video pipelines.
 
-## Key Changes in ARC 11
+## Key Changes in ARC 12
 
-- **Schedule Planning Section**: A dedicated full-width dashboard showing queue items grouped chronologically by their planned publish dates.
-- **Active Planning Filters**: Quick segmented controls to filter planning boards by **Today**, **This Week** (next 7 days), **All Planned**, or identify items with **Missing Schedule** info.
-- **Goal Target Widget & Helper**: A customizable weekly content target goal (storing target count in `localStorage`, defaulting to 14) displaying planning counts and proactive target insights ("You still need X more planned videos", "Weekly target reached").
-- **Timing Overlap Conflicts**: Automatic background checks that flag date/time schedule overlaps with a warning badge and warning helper ("Another video is planned at the same date and time").
-- **Missing Metadata Audits**: Proactive visual prompts identifying queue items lacking publish dates or times with suggestions to configure details in the metadata editor.
+- **Interactive Queue Filters**: Segmented filter selectors with dynamic badge counts to filter by **All**, **Scheduled**, **Uploaded**, **Failed**, **Missing Schedule**, **Ready**, **Needs Review**, or **Blocked**.
+- **Flexible Queue Sorting**: Order the upload queue dynamically by **Publish Date Ascending/Descending**, **Newest First**, **Oldest First**, or **Status**.
+- **Hide Uploaded Toggle**: A persistent user preference (`localStorage` bound) to automatically hide completed uploads from the active working view, keeping focus on remaining action items.
+- **In-place Metadata Editor**: Click "Edit" on any non-uploaded item to customize titles (with safe 100-character limit checks), descriptions, hashtags, visibility modes, and planned publication dates/times in a gorgeous inline form.
+- **Queue Item Duplication**: Clone existing queued videos with a single click to easily test different scheduling, titles, or tag variants.
+- **Bulk Batch Selectors**: Add quick-batch actions ("Select Ready" or "Select Failed") to instantly select up to 3 compatible items for batch uploads or batch retry runs.
+- **Safer Queue Deletions**: Added confirmation prompts before removing items from the queue to prevent accidental deletion of draft metadata.
 - **Integration & Safety**:
   - Does NOT auto-upload in the background (no server cron or backend queue managers).
   - Preserves manual single upload, manual batch upload (up to 3 selected items sequentially), and retry upload capabilities.
-  - No new environment variables.
-  - No new database tables.
+  - No new environment variables or new database tables.
 
 ## Important Scope
 
-ARC 11 supports manual batch upload for up to 3 selected queue items. Uploads run sequentially, not in parallel. Automatic background scheduling is not active yet.
+ARC 12 supports manual batch upload for up to 3 selected queue items. Uploads run sequentially, not in parallel. Automatic background scheduling is not active yet.
 
 YouTube scopes used:
 
@@ -40,7 +41,7 @@ VITE_GOOGLE_API_KEY=YOUR_GOOGLE_API_KEY
 VITE_GOOGLE_APP_ID=YOUR_GOOGLE_PROJECT_NUMBER
 ```
 
-No new environment variables are required for ARC 11.
+No new environment variables are required for ARC 12.
 
 ## Google Cloud Setup
 
@@ -79,7 +80,7 @@ add column if not exists upload_error text,
 add column if not exists uploaded_at timestamptz;
 ```
 
-ARC 11 does not require new database tables.
+ARC 12 does not require new database tables.
 
 ## Development
 
