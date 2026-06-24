@@ -60,7 +60,9 @@ import {
   addUploadQueueItem,
   deleteUploadQueueItem,
   updateUploadQueueStatus,
-  clearUploadQueue
+  clearUploadQueue,
+  markQueueItemUploaded,
+  markQueueItemUploadFailed
 } from './services/uploadQueueService';
 import {
   loadGoogleScripts,
@@ -74,6 +76,11 @@ import {
   getMyYouTubeChannels,
   YouTubeChannelInfo
 } from './services/youtubeService';
+import {
+  requestYouTubeUploadToken,
+  downloadDriveFileAsBlob,
+  uploadVideoToYouTube
+} from './services/youtubeUploadService';
 
 export default function App() {
   // State for Video Bank
@@ -143,6 +150,11 @@ export default function App() {
 
   // Success alert states
   const [notification, setNotification] = useState<{ id: string; text: string; type: 'success' | 'info' | 'error' } | null>(null);
+
+  // Manual YouTube upload states (ARC 7)
+  const [uploadingItemId, setUploadingItemId] = useState<string | null>(null);
+  const [uploadingStep, setUploadingStep] = useState<string>('');
+  const [uploadingPercent, setUploadingPercent] = useState<number>(0);
 
   const showNotification = (text: string, type: 'success' | 'info' | 'error' = 'success') => {
     setNotification({ id: String(Date.now()), text, type });
@@ -803,6 +815,175 @@ export default function App() {
     runStep();
   };
 
+  const handleUploadToYouTube = async (item: QueueItem) => {
+    // 1. Check readiness level first
+    const readiness = getReadinessForItem(item.id);
+    if (readiness?.level === 'blocked') {
+      showNotification("Upload is blocked. Please resolve all blocked issues in the readiness check panel first.", "error");
+      return;
+    }
+
+    // 2. Ask for manual upload confirmation
+    const confirmUpload = window.confirm(
+      `Upload this video "${item.youtubeTitle}" to YouTube now? ARC 7 uploads manually and does not schedule yet.`
+    );
+    if (!confirmUpload) {
+      return;
+    }
+
+    setUploadingItemId(item.id);
+    setUploadingStep('Preparing upload...');
+    setUploadingPercent(10);
+
+    try {
+      // 3. Find the associated video in bank to retrieve Google Drive file details
+      const matchedVideo = videos.find(v => v.id === item.videoId || v.driveFileId === item.videoId || v.fileName === item.fileName);
+      
+      // Determine if mock/demo video or Drive video
+      const isMock = matchedVideo?.source === 'mock' || !matchedVideo?.source;
+      const driveFileId = matchedVideo?.driveFileId || item.videoId?.replace('drive-', '');
+
+      let videoBlob: Blob;
+
+      if (isMock) {
+        // If it's a mock demo video, let's gracefully fail with a helpful notification or simulate successfully
+        if (!driveFileId) {
+          throw new Error("Missing Google Drive file ID. Real uploads require a Google Drive video from your synced bank.");
+        }
+      }
+
+      if (!driveFileId) {
+        throw new Error("Missing Google Drive file ID. Real uploads require a Google Drive video.");
+      }
+
+      // 4. Request Google YouTube upload scope token
+      setUploadingStep('Authorizing YouTube upload scope...');
+      setUploadingPercent(30);
+      const uploadToken = await requestYouTubeUploadToken();
+
+      // 5. Ensure we have Google Drive access token to download the file
+      setUploadingStep('Downloading video from Google Drive...');
+      setUploadingPercent(50);
+
+      let driveToken = gDriveToken;
+      if (!driveToken) {
+        try {
+          driveToken = await requestDriveAccessToken();
+          setGDriveToken(driveToken);
+          setGDriveStatus('Google Drive Connected');
+        } catch (authErr: any) {
+          throw new Error(`Google Drive authorization failed: ${authErr.message || authErr}`);
+        }
+      }
+
+      // 6. Download file from Drive
+      try {
+        videoBlob = await downloadDriveFileAsBlob(driveFileId, driveToken);
+      } catch (dlErr: any) {
+        throw new Error(`Google Drive download failed: ${dlErr.message || dlErr}`);
+      }
+
+      // 7. Upload to YouTube using resumable upload API
+      setUploadingStep('Uploading to YouTube...');
+      setUploadingPercent(75);
+
+      // Add a warning if there is a schedule saved
+      if (item.publishDate || item.publishTime) {
+        showNotification("Schedule date/time is saved but ARC 7 uploads manually now.", "info");
+      }
+
+      const result = await uploadVideoToYouTube({
+        accessToken: uploadToken,
+        videoBlob,
+        fileName: item.fileName,
+        title: item.youtubeTitle,
+        description: `${item.description}\n\n${item.hashtags}`.trim(),
+        visibility: item.visibility,
+      });
+
+      // 8. Handle successful upload
+      setUploadingStep('Upload complete');
+      setUploadingPercent(100);
+
+      // Save upload results to Supabase if configured
+      if (isSupabaseConfigured) {
+        try {
+          await markQueueItemUploaded(item.id, {
+            youtube_video_id: result.youtubeVideoId,
+            youtube_video_url: result.youtubeVideoUrl,
+            uploaded_at: new Date().toISOString()
+          });
+
+          // Sync Drive video status if from Drive
+          if (matchedVideo && matchedVideo.source === 'drive') {
+            try {
+              await updateDriveVideoStatus(matchedVideo.id, 'Uploaded');
+            } catch (driveErr: any) {
+              console.warn("Could not sync uploaded status to drive_videos table:", driveErr);
+            }
+          }
+        } catch (dbErr: any) {
+          console.error("Failed to update database upload status:", dbErr);
+          showNotification(`Database save warning: ${dbErr.message}`, 'error');
+        }
+      }
+
+      // Update local React state for immediate response
+      setQueue(prev => prev.map(q => {
+        if (q.id === item.id) {
+          return {
+            ...q,
+            status: 'Uploaded',
+            youtubeVideoId: result.youtubeVideoId,
+            youtubeVideoUrl: result.youtubeVideoUrl,
+            uploadedAt: new Date().toISOString(),
+            uploadError: null
+          };
+        }
+        return q;
+      }));
+
+      setVideos(prev => prev.map(v => v.id === item.videoId ? { ...v, status: 'Uploaded' } : v));
+
+      showNotification(`Successfully uploaded to YouTube! Video URL: ${result.youtubeVideoUrl}`, 'success');
+
+    } catch (error: any) {
+      console.error("YouTube Upload process failed:", error);
+      setUploadingStep('Upload failed');
+      setUploadingPercent(100);
+
+      const errorMsg = error.message || "An unexpected error occurred during the upload sequence.";
+      
+      // Save failure status to Supabase if configured
+      if (isSupabaseConfigured) {
+        try {
+          await markQueueItemUploadFailed(item.id, errorMsg);
+        } catch (dbErr: any) {
+          console.error("Failed to mark database item as failed:", dbErr);
+        }
+      }
+
+      // Update local React state
+      setQueue(prev => prev.map(q => {
+        if (q.id === item.id) {
+          return {
+            ...q,
+            status: 'Failed',
+            uploadError: errorMsg
+          };
+        }
+        return q;
+      }));
+
+      showNotification(`Upload failed: ${errorMsg}`, 'error');
+    } finally {
+      // Keep state visible for 5 seconds to let the user see progress outcomes
+      setTimeout(() => {
+        setUploadingItemId(null);
+      }, 5000);
+    }
+  };
+
   // Drag and Drop simulation
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -848,8 +1029,8 @@ export default function App() {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-bold font-display tracking-tight text-white">AutoTube Lite</h1>
-                <span className="text-[10px] font-mono font-bold bg-purple-500/20 text-purple-400 border border-purple-500/30 px-1.5 py-0.5 rounded-md uppercase animate-pulse">
-                  ARC 6 Upload Readiness
+                <span className="text-[10px] font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 px-1.5 py-0.5 rounded-md uppercase animate-pulse">
+                  ARC 7 Single Upload
                 </span>
               </div>
               <p className="text-xs text-slate-400">Google Drive + YouTube Shorts Scheduler</p>
@@ -1599,11 +1780,49 @@ export default function App() {
                           
                           {/* Simulated status feedback */}
                           <div className="flex flex-col items-end gap-1">
-                            {item.status === 'Uploaded' ? (
-                              <span className="text-[9px] px-2 py-0.5 bg-green-500/20 text-green-400 border border-green-500/20 rounded uppercase font-bold flex items-center gap-1">
-                                <CheckCircle className="w-3 h-3" />
-                                Uploaded
-                              </span>
+                            {uploadingItemId === item.id ? (
+                              <div className="flex flex-col items-end gap-1 w-28">
+                                <span className="text-[9px] px-2 py-0.5 bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded uppercase font-bold flex items-center gap-1 animate-pulse">
+                                  <Activity className="w-3 h-3 text-rose-400 animate-spin" />
+                                  Progress {uploadingPercent}%
+                                </span>
+                                <span className="text-[8px] text-slate-400 font-mono text-right truncate max-w-[120px]" title={uploadingStep}>
+                                  {uploadingStep}
+                                </span>
+                                <div className="w-full bg-white/10 h-1 rounded-full overflow-hidden">
+                                  <div className="bg-rose-500 h-full transition-all duration-300" style={{ width: `${uploadingPercent}%` }}></div>
+                                </div>
+                              </div>
+                            ) : item.status === 'Uploaded' ? (
+                              <div className="flex flex-col items-end gap-1">
+                                <span className="text-[9px] px-2 py-0.5 bg-green-500/20 text-green-400 border border-green-500/20 rounded uppercase font-bold flex items-center gap-1">
+                                  <CheckCircle className="w-3 h-3" />
+                                  Uploaded
+                                </span>
+                                {item.youtubeVideoUrl && (
+                                  <a
+                                    href={item.youtubeVideoUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-[9px] text-sky-400 hover:text-sky-300 underline font-mono flex items-center gap-1 mt-0.5"
+                                  >
+                                    <Youtube className="w-2.5 h-2.5 shrink-0" />
+                                    <span>View Video</span>
+                                  </a>
+                                )}
+                              </div>
+                            ) : item.status === 'Failed' ? (
+                              <div className="flex flex-col items-end gap-1">
+                                <span className="text-[9px] px-2 py-0.5 bg-red-500/20 text-red-400 border border-red-500/20 rounded uppercase font-bold flex items-center gap-1">
+                                  <AlertTriangle className="w-3 h-3" />
+                                  Failed
+                                </span>
+                                {item.uploadError && (
+                                  <span className="text-[8px] text-red-400 font-medium max-w-[130px] text-right truncate" title={item.uploadError}>
+                                    {item.uploadError}
+                                  </span>
+                                )}
+                              </div>
                             ) : isProcessing ? (
                               <div className="flex flex-col items-end gap-1 w-24">
                                 <span className="text-[9px] px-2 py-0.5 bg-blue-500/20 text-blue-400 border border-blue-500/20 rounded uppercase font-bold flex items-center gap-1">
@@ -1623,8 +1842,20 @@ export default function App() {
                           </div>
 
                           {/* Action button */}
-                          {!simulationActive && (
+                          {!simulationActive && uploadingItemId !== item.id && (
                             <div className="flex md:flex-col items-end gap-1">
+                              {item.status !== 'Uploaded' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleUploadToYouTube(item)}
+                                  disabled={uploadingItemId !== null || readiness?.level === 'blocked'}
+                                  className="px-2 py-1 text-[10px] text-rose-300 hover:text-white bg-rose-500/10 hover:bg-rose-500/25 border border-rose-500/20 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition flex items-center gap-1 cursor-pointer"
+                                  title={readiness?.level === 'blocked' ? "Resolve blocked issues first" : "Upload to YouTube now"}
+                                >
+                                  <Youtube className="w-3 h-3 text-rose-400 shrink-0 animate-pulse" />
+                                  <span>Upload to YouTube</span>
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 onClick={() => setReadinessOpenId(readinessOpenId === item.id ? null : item.id)}

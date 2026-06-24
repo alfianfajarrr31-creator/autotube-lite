@@ -1,27 +1,30 @@
-# AutoTube Lite ARC 6 — Upload Readiness Check
+# AutoTube Lite ARC 7 — Single YouTube Upload
 
 AutoTube Lite is a lightweight YouTube Shorts upload and scheduling dashboard.
 
-ARC 6 adds a safety layer before real YouTube uploading. The app can now inspect queued videos and tell you whether each item is ready, needs review, or is blocked before a future upload ARC.
+ARC 7 adds the ability to upload a single ready queue item from Google Drive to YouTube manually.
 
-## Key Features in ARC 6
+## Key Features in ARC 7
 
 - Supabase upload queue persistence
 - Google Drive Picker and Drive Bank persistence
 - Metadata presets for faster manual metadata entry
-- YouTube Connect using readonly channel access
+- YouTube Connect using readonly & upload access
 - Upload readiness badges for every queue item
 - Check Readiness panel with blocked issues and warnings
 - Check All Queue summary: Ready, Needs Review, and Blocked
+- Manual upload to YouTube for any ready/warning item in the queue
+- Real-time download of selected video from Google Drive and upload to YouTube using YouTube Data API v3
 
 ## Important Scope
 
-ARC 6 does **not** upload videos to YouTube yet. It only validates queued items before a real upload feature is added later.
+ARC 7 supports **manual upload for ONE selected queue item**. It does **not** support batch uploads or automatic background scheduling yet.
 
-Current YouTube scope remains readonly:
+YouTube scopes used:
 
 ```text
 https://www.googleapis.com/auth/youtube.readonly
+https://www.googleapis.com/auth/youtube.upload
 ```
 
 ## Required Environment Variables
@@ -36,7 +39,7 @@ VITE_GOOGLE_API_KEY=YOUR_GOOGLE_API_KEY
 VITE_GOOGLE_APP_ID=YOUR_GOOGLE_PROJECT_NUMBER
 ```
 
-No new environment variables are required for ARC 6.
+No new environment variables are required for ARC 7.
 
 ## Google Cloud Setup
 
@@ -51,6 +54,7 @@ OAuth consent screen scopes used so far:
 ```text
 https://www.googleapis.com/auth/drive.file
 https://www.googleapis.com/auth/youtube.readonly
+https://www.googleapis.com/auth/youtube.upload
 ```
 
 Add your local and Vercel origins to the OAuth Client ID Authorized JavaScript origins. Also add your YouTube/Drive account email as a Test User while the app is in Testing mode.
@@ -62,7 +66,19 @@ AutoTube Lite currently uses:
 - `upload_queue` for scheduled queue metadata
 - `drive_videos` for selected Google Drive video metadata
 
-ARC 6 does not require new database tables.
+### SQL Migration for ARC 7
+
+Run this SQL statement in your Supabase SQL Editor to extend the `upload_queue` table safely for ARC 7:
+
+```sql
+alter table upload_queue
+add column if not exists youtube_video_id text,
+add column if not exists youtube_video_url text,
+add column if not exists upload_error text,
+add column if not exists uploaded_at timestamptz;
+```
+
+ARC 7 does not require other new database tables.
 
 ## Development
 

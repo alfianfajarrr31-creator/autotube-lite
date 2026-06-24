@@ -37,7 +37,7 @@ export function checkUploadReadiness(
   }
 
   if (queueItem.status === 'Uploaded') {
-    issues.push('This queue item is already marked as Uploaded.');
+    issues.push('This queue item is already uploaded.');
   }
 
   if (!queueItem.youtubeTitle?.trim()) {
@@ -57,8 +57,15 @@ export function checkUploadReadiness(
   });
 
   const expectedDriveVideo = queueItem.videoId?.startsWith('drive-') || matchedVideo?.source === 'drive';
-  if (expectedDriveVideo && !matchedVideo) {
-    issues.push('Drive video is missing from Drive Bank.');
+  if (expectedDriveVideo) {
+    if (!matchedVideo) {
+      issues.push('Drive video is missing from Drive Bank.');
+    } else {
+      const actualFileId = matchedVideo.driveFileId || queueItem.videoId?.replace('drive-', '');
+      if (!actualFileId) {
+        issues.push('Google Drive file ID is missing or invalid.');
+      }
+    }
   }
 
   if (matchedVideo?.source === 'mock') {

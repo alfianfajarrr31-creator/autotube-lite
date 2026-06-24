@@ -58,6 +58,10 @@ export interface QueueItem {
   status: 'Draft' | 'Scheduled' | 'Uploaded' | 'Failed';
   progress?: number; // 0 - 100 for interactive simulation
   duration: string;
+  youtubeVideoId?: string | null;
+  youtubeVideoUrl?: string | null;
+  uploadError?: string | null;
+  uploadedAt?: string | null;
 }
 
 export interface UploadQueueItem {
@@ -76,6 +80,10 @@ export interface UploadQueueItem {
   status: 'Draft' | 'Scheduled' | 'Uploaded' | 'Failed';
   created_at?: string;
   updated_at?: string;
+  youtube_video_id?: string | null;
+  youtube_video_url?: string | null;
+  upload_error?: string | null;
+  uploaded_at?: string | null;
 }
 
 export function mapToQueueItem(dbItem: UploadQueueItem): QueueItem {
@@ -93,6 +101,10 @@ export function mapToQueueItem(dbItem: UploadQueueItem): QueueItem {
     publishTime: dbItem.publish_time || '',
     status: dbItem.status || 'Scheduled',
     duration: dbItem.duration || '0:30',
+    youtubeVideoId: dbItem.youtube_video_id,
+    youtubeVideoUrl: dbItem.youtube_video_url,
+    uploadError: dbItem.upload_error,
+    uploadedAt: dbItem.uploaded_at,
   };
 }
 
@@ -111,5 +123,9 @@ export function mapToDbItem(queueItem: QueueItem): Omit<UploadQueueItem, 'create
     publish_date: queueItem.publishDate,
     publish_time: queueItem.publishTime,
     status: queueItem.status,
+    youtube_video_id: queueItem.youtubeVideoId,
+    youtube_video_url: queueItem.youtubeVideoUrl,
+    upload_error: queueItem.uploadError,
+    uploaded_at: queueItem.uploadedAt,
   };
 }

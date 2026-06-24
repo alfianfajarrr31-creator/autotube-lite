@@ -81,6 +81,68 @@ export async function updateUploadQueueStatus(
 
   return data as UploadQueueItem;
 }
+
+export async function markQueueItemUploaded(
+  id: string,
+  payload: {
+    youtube_video_id: string;
+    youtube_video_url: string;
+    uploaded_at: string;
+  }
+): Promise<UploadQueueItem> {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error('Supabase is not configured.');
+  }
+
+  const { data, error } = await supabase
+    .from('upload_queue')
+    .update({
+      status: 'Uploaded',
+      youtube_video_id: payload.youtube_video_id,
+      youtube_video_url: payload.youtube_video_url,
+      uploaded_at: payload.uploaded_at,
+      upload_error: null,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error marking queue item as uploaded:', error);
+    throw new Error(`Failed to update upload queue item: ${error.message}`);
+  }
+
+  return data as UploadQueueItem;
+}
+
+export async function markQueueItemUploadFailed(
+  id: string,
+  errorMessage: string
+): Promise<UploadQueueItem> {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error('Supabase is not configured.');
+  }
+
+  const { data, error } = await supabase
+    .from('upload_queue')
+    .update({
+      status: 'Failed',
+      upload_error: errorMessage,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error marking queue item upload failed:', error);
+    throw new Error(`Failed to update upload queue item failure: ${error.message}`);
+  }
+
+  return data as UploadQueueItem;
+}
+
 export async function clearUploadQueue(): Promise<void> {
   if (!isSupabaseConfigured || !supabase) {
     throw new Error('Supabase is not configured.');
