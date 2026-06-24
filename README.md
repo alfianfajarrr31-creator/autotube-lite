@@ -1,15 +1,17 @@
-# AutoTube Lite ARC 9 — Retry Failed Upload
+# AutoTube Lite ARC 10 — Manual Batch Upload
 
 AutoTube Lite is a lightweight YouTube Shorts upload and scheduling dashboard.
 
-ARC 9 adds retry for failed uploads, allowing users to re-run single uploads without duplicating queue entries or metadata.
+ARC 10 adds manual batch upload capabilities, allowing users to select multiple eligible queue items and upload them sequentially in a controlled batch.
 
-## Key Changes in ARC 9
+## Key Changes in ARC 10
 
-- **Retry Failed Uploads**: Failed items in either the upload queue or upload history display a dedicated "Retry Upload" button that re-runs the manual upload flow directly.
-- **State Reuse**: The retry flow uses the existing queue item ID, Google Drive video mapping, and metadata presets. No duplicated database items or duplicate metadata records are created.
-- **Reset Failed State**: When retrying starts, `upload_error` is cleared from Supabase and local state instantly, and temporary step indicators denote the process ("Retrying upload...").
-- **No Scope Bloat**: No batch uploads, automatic background scheduler, new environment variables, or database schema additions have been introduced.
+- **Batch Selection**: Added checkbox selections on queue items to choose up to 3 eligible videos for batch uploading.
+- **Sequential Upload Processing**: Processes each selected item sequentially with comprehensive status feedback, preventing concurrent request errors.
+- **Batch Action Buttons**: Added "Upload Selected" and "Clear Selection" controls directly in the queue header.
+- **Stop-On-Error Behavior**: Optional config checkbox allowing the batch to halt immediately after any upload failure, preserving remaining tokens and preventing consecutive errors.
+- **Batch Progress UI**: Beautiful realtime progress tracker displaying active progress bars, current item titles, and a detailed summary table of batch results.
+- **Integration & Safety**: Preserves manual single upload, retry upload, and does not alter the underlying database schema.
 
 ## Key Changes in ARC 8
 
@@ -20,35 +22,9 @@ ARC 9 adds retry for failed uploads, allowing users to re-run single uploads wit
 - **Summary Bento Cards**: Integrated small summary cards calculating Total Queue Items, Uploaded count, Failed count, and Scheduled count in real time from existing `upload_queue` data.
 - **No Scope Bloat**: No batch upload, automatic background scheduler, new environment variables, or database schema additions have been introduced.
 
-## Key Changes in ARC 7.2
-
-- **Metadata Cleanup**: Removed unrequested Gemini API capability declarations and refined applet definitions.
-- **Outdated Label Purge**: Cleaned up legacy reference points to ARC 6 or obsolete readiness-only descriptions in the workspace and simulator warnings.
-- **Status & Wording Alignment**: Highlighted that real single-video manual upload is fully active while simulation mode remains distinct as a separate playground tool.
-
-## Key Features in ARC 7.1
-
-- **Branded Success Experience**: Uploaded queue cards transition to a distinct, emerald green glowing container with an "Uploaded" success indicator.
-- **Copy Video URL Link**: A copy action button copies the live YouTube video link (`youtube_video_url`) to the user's clipboard and provides a floating feedback toast.
-- **Full-Width Collapsible Readiness Drawer**: Redesigned readiness checker layouts into clean, full-width drawers that present detailed checklists clearly.
-- **"Upload Complete" Readiness Panel**: Replaces error-style "Blocked" alerts with neutral/positive "Upload Complete" panels explaining that duplicate uploads are disabled for safety.
-- **Layout Rhythm Cleanup**: Separated visual video cover previews and scheduling data from action elements, preventing layout shifts or text wrapping on multiple screen sizes.
-
-## Key Features in ARC 7
-
-- Supabase upload queue persistence
-- Google Drive Picker and Drive Bank persistence
-- Metadata presets for faster manual metadata entry
-- YouTube Connect using readonly & upload access
-- Upload readiness badges for every queue item
-- Check Readiness panel with blocked issues and warnings
-- Check All Queue summary: Ready, Needs Review, and Blocked
-- Manual upload to YouTube for any ready/warning item in the queue
-- Real-time download of selected video from Google Drive and upload to YouTube using YouTube Data API v3
-
 ## Important Scope
 
-ARC 7 supports **manual upload for ONE selected queue item**. It does **not** support batch uploads or automatic background scheduling yet.
+ARC 10 supports manual batch upload for up to 3 selected queue items. Uploads run sequentially, not in parallel. Automatic background scheduling is not active yet.
 
 YouTube scopes used:
 
@@ -69,7 +45,7 @@ VITE_GOOGLE_API_KEY=YOUR_GOOGLE_API_KEY
 VITE_GOOGLE_APP_ID=YOUR_GOOGLE_PROJECT_NUMBER
 ```
 
-No new environment variables are required for ARC 9.
+No new environment variables are required for ARC 10.
 
 ## Google Cloud Setup
 
@@ -108,7 +84,7 @@ add column if not exists upload_error text,
 add column if not exists uploaded_at timestamptz;
 ```
 
-ARC 9 does not require other new database tables.
+ARC 10 does not require new database tables.
 
 ## Development
 

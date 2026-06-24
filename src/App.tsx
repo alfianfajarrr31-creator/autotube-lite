@@ -148,6 +148,16 @@ export default function App() {
   const [historyFilter, setHistoryFilter] = useState<'All' | 'Uploaded' | 'Failed' | 'Scheduled'>('All');
   const [historySearch, setHistorySearch] = useState('');
 
+  // ARC 10 Manual Batch Upload states
+  const [selectedQueueIds, setSelectedQueueIds] = useState<string[]>([]);
+  const [batchUploadActive, setBatchUploadActive] = useState(false);
+  const [batchStatus, setBatchStatus] = useState<'Idle' | 'Running' | 'Complete' | 'Failed/Stopped'>('Idle');
+  const [batchCurrentIndex, setBatchCurrentIndex] = useState(0);
+  const [batchTotalCount, setBatchTotalCount] = useState(0);
+  const [batchCurrentItemTitle, setBatchCurrentItemTitle] = useState('');
+  const [batchStopOnError, setBatchStopOnError] = useState(true);
+  const [batchResults, setBatchResults] = useState<{ id: string; title: string; status: 'Success' | 'Failed' | 'Skipped'; error?: string; reason?: string }[]>([]);
+
   // Quick form state for "Creating own custom mocked Video"
   const [isAddMockOpen, setIsAddMockOpen] = useState(false);
   const [mockVidTitle, setMockVidTitle] = useState('');
@@ -854,6 +864,218 @@ export default function App() {
       });
   };
 
+  const isItemSelectable = (item: QueueItem) => {
+    if (item.status === 'Uploaded') return { selectable: false, reason: 'Already uploaded' };
+    if (uploadingItemId === item.id) return { selectable: false, reason: 'Currently uploading' };
+    const matchedVideo = videos.find(v => v.id === item.videoId || v.driveFileId === item.videoId || v.fileName === item.fileName);
+    if (!matchedVideo) return { selectable: false, reason: 'Google Drive video file is missing from synced bank' };
+    const readiness = getReadinessForItem(item.id);
+    if (readiness?.level === 'blocked') return { selectable: false, reason: 'Upload is blocked. Check readiness info' };
+    return { selectable: true };
+  };
+
+  const handleCheckboxClick = (item: QueueItem, disabled: boolean, reason?: string) => {
+    if (disabled && reason) {
+      showNotification(`Cannot select item: ${reason}`, 'info');
+    }
+  };
+
+  const handleStartBatchUpload = async () => {
+    if (selectedQueueIds.length === 0) return;
+    if (selectedQueueIds.length > 3) {
+      showNotification("ARC 10 allows up to 3 videos per batch for safety.", "error");
+      return;
+    }
+    if (!selectedYtChannel) {
+      showNotification("Please connect your YouTube channel first.", "error");
+      return;
+    }
+
+    const confirmBatch = window.confirm(
+      `Upload ${selectedQueueIds.length} selected video(s) to YouTube now? ARC 10 uploads manually and does not schedule yet.`
+    );
+    if (!confirmBatch) return;
+
+    setBatchUploadActive(true);
+    setBatchStatus('Running');
+    setBatchTotalCount(selectedQueueIds.length);
+    setBatchResults([]);
+
+    const itemsToUpload = queue.filter(q => selectedQueueIds.includes(q.id));
+
+    for (let i = 0; i < itemsToUpload.length; i++) {
+      const item = itemsToUpload[i];
+      setBatchCurrentIndex(i + 1);
+      setBatchCurrentItemTitle(item.youtubeTitle || item.fileName);
+
+      // Check if already uploaded (prevent duplicate upload)
+      const freshQueue = [...queue]; // we can also read state directly inside the loop
+      const freshItem = freshQueue.find(q => q.id === item.id) || item;
+      if (freshItem.status === 'Uploaded') {
+        setBatchResults(prev => [...prev, {
+          id: item.id,
+          title: item.youtubeTitle || item.fileName,
+          status: 'Skipped',
+          reason: 'Skipped because already uploaded.'
+        }]);
+        continue;
+      }
+
+      const selectCheck = isItemSelectable(freshItem);
+      if (!selectCheck.selectable) {
+        setBatchResults(prev => [...prev, {
+          id: item.id,
+          title: item.youtubeTitle || item.fileName,
+          status: 'Skipped',
+          reason: selectCheck.reason || 'Item is not eligible'
+        }]);
+        continue;
+      }
+
+      const isRetry = freshItem.status === 'Failed';
+
+      try {
+        setUploadingItemId(item.id);
+        setUploadingStep(isRetry ? `Retrying upload... (${i + 1} of ${itemsToUpload.length})` : `Preparing upload... (${i + 1} of ${itemsToUpload.length})`);
+        setUploadingPercent(15);
+
+        if (isRetry) {
+          if (isSupabaseConfigured) {
+            try {
+              await resetQueueItemForRetry(item.id);
+            } catch (dbErr: any) {
+              console.error("Failed to reset retry status in database for batch:", dbErr);
+            }
+          }
+          setQueue(prev => prev.map(q => {
+            if (q.id === item.id) {
+              return {
+                ...q,
+                uploadError: null
+              };
+            }
+            return q;
+          }));
+        }
+
+        const matchedVideo = videos.find(v => v.id === item.videoId || v.driveFileId === item.videoId || v.fileName === item.fileName);
+        const driveFileId = matchedVideo?.driveFileId || item.videoId?.replace('drive-', '');
+
+        if (!driveFileId) {
+          throw new Error("Missing Google Drive file ID. Real uploads require a Google Drive video.");
+        }
+
+        setUploadingStep(`Authorizing YouTube... (${i + 1} of ${itemsToUpload.length})`);
+        setUploadingPercent(30);
+        const uploadToken = await requestYouTubeUploadToken();
+
+        setUploadingStep(`Downloading from Drive... (${i + 1} of ${itemsToUpload.length})`);
+        setUploadingPercent(50);
+        let driveToken = gDriveToken;
+        if (!driveToken) {
+          driveToken = await requestDriveAccessToken();
+          setGDriveToken(driveToken);
+          setGDriveStatus('Google Drive Connected');
+        }
+
+        const videoBlob = await downloadDriveFileAsBlob(driveFileId, driveToken);
+
+        setUploadingStep(`Uploading to YouTube... (${i + 1} of ${itemsToUpload.length})`);
+        setUploadingPercent(75);
+
+        const result = await uploadVideoToYouTube({
+          accessToken: uploadToken,
+          videoBlob,
+          fileName: item.fileName,
+          title: item.youtubeTitle,
+          description: `${item.description}\n\n${item.hashtags}`.trim(),
+          visibility: item.visibility,
+        });
+
+        setUploadingStep(`Complete (${i + 1} of ${itemsToUpload.length})`);
+        setUploadingPercent(100);
+
+        if (isSupabaseConfigured) {
+          await markQueueItemUploaded(item.id, {
+            youtube_video_id: result.youtubeVideoId,
+            youtube_video_url: result.youtubeVideoUrl,
+            uploaded_at: new Date().toISOString()
+          });
+
+          if (matchedVideo && matchedVideo.source === 'drive') {
+            try {
+              await updateDriveVideoStatus(matchedVideo.id, 'Uploaded');
+            } catch (driveErr) {}
+          }
+        }
+
+        setQueue(prev => prev.map(q => {
+          if (q.id === item.id) {
+            return {
+              ...q,
+              status: 'Uploaded',
+              youtubeVideoId: result.youtubeVideoId,
+              youtubeVideoUrl: result.youtubeVideoUrl,
+              uploadedAt: new Date().toISOString(),
+              uploadError: null
+            };
+          }
+          return q;
+        }));
+
+        setVideos(prev => prev.map(v => v.id === item.videoId ? { ...v, status: 'Uploaded' } : v));
+
+        setBatchResults(prev => [...prev, {
+          id: item.id,
+          title: item.youtubeTitle || item.fileName,
+          status: 'Success'
+        }]);
+
+      } catch (err: any) {
+        console.error(`Batch upload failed for item ${item.id}:`, err);
+        const errorMsg = err.message || "An unexpected error occurred.";
+
+        if (isSupabaseConfigured) {
+          try {
+            await markQueueItemUploadFailed(item.id, errorMsg);
+          } catch (dbErr) {}
+        }
+
+        setQueue(prev => prev.map(q => {
+          if (q.id === item.id) {
+            return {
+              ...q,
+              status: 'Failed',
+              uploadError: errorMsg
+            };
+          }
+          return q;
+        }));
+
+        setBatchResults(prev => [...prev, {
+          id: item.id,
+          title: item.youtubeTitle || item.fileName,
+          status: 'Failed',
+          error: errorMsg
+        }]);
+
+        if (batchStopOnError) {
+          setBatchStatus('Failed/Stopped');
+          setUploadingItemId(null);
+          showNotification("Batch stopped after an upload failed.", "error");
+          setBatchUploadActive(false);
+          return; // STOP batch execution entirely!
+        }
+      }
+    }
+
+    setUploadingItemId(null);
+    setBatchStatus('Complete');
+    setBatchUploadActive(false);
+    setSelectedQueueIds([]); // Clear selection upon batch complete
+    showNotification("Batch upload complete.", "success");
+  };
+
   const handleUploadToYouTube = async (item: QueueItem) => {
     // 1. Check readiness level first
     const readiness = getReadinessForItem(item.id);
@@ -868,7 +1090,7 @@ export default function App() {
     const confirmUpload = window.confirm(
       isRetry
         ? `Retry uploading this failed video "${item.youtubeTitle}" to YouTube now?`
-        : `Upload this video "${item.youtubeTitle}" to YouTube now? ARC 9 uploads manually and does not schedule yet.`
+        : `Upload this video "${item.youtubeTitle}" to YouTube now? ARC 10 uploads manually and does not schedule yet.`
     );
     if (!confirmUpload) {
       return;
@@ -1103,7 +1325,7 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-bold font-display tracking-tight text-white">AutoTube Lite</h1>
                 <span className="text-[10px] font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 px-1.5 py-0.5 rounded-md uppercase animate-pulse">
-                  ARC 9 Retry Upload
+                  ARC 10 Manual Batch Upload
                 </span>
               </div>
               <p className="text-xs text-slate-400">Google Drive + YouTube Shorts Scheduler</p>
@@ -1425,7 +1647,7 @@ export default function App() {
                 <div className="flex items-start gap-2.5 p-2.5 bg-amber-500/5 border border-amber-500/10 rounded-xl text-left">
                   <Info className="w-4 h-4 text-amber-500/85 shrink-0 mt-0.5" />
                   <span className="text-[10px] text-amber-200/80 leading-normal">
-                    <strong>Note:</strong> ARC 7.2 supports manual single-video upload. Batch upload and automatic scheduling are not active yet.
+                    <strong>Note:</strong> ARC 10 supports manual batch upload for up to 3 videos at a time. Uploads run one by one. Automatic scheduling is not active yet.
                   </span>
                 </div>
               </div>
@@ -1684,11 +1906,135 @@ export default function App() {
                   </div>
                   <div className="col-span-3 flex items-start gap-2.5 p-2.5 bg-sky-500/5 border border-sky-500/10 rounded-xl text-left">
                     <Info className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
-                    <span className="text-[10px] text-sky-100/80 leading-normal">
-                      ARC 7.2 supports manual single-video upload. Batch upload and automatic scheduling are not active yet.
+                    <span className="text-[10px] text-sky-100/80 leading-normal font-medium">
+                      ARC 10 supports manual batch upload for up to 3 videos at a time. Uploads run one by one. Automatic scheduling is not active yet.
                       {readinessSummaryMessage ? ` Latest check: ${readinessSummaryMessage}` : ''}
                     </span>
                   </div>
+                </div>
+              )}
+
+              {/* BATCH PROGRESS PANEL (ARC 10) */}
+              {batchStatus !== 'Idle' && (
+                <div className="p-4 bg-rose-500/5 border border-rose-500/20 rounded-2xl flex flex-col gap-3 animate-fadeIn">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Activity className={`w-4 h-4 ${batchStatus === 'Running' ? 'text-rose-400 animate-spin' : 'text-slate-400'}`} />
+                      <span className="text-xs font-bold uppercase tracking-wider text-white">Batch Upload Progress</span>
+                    </div>
+                    <span className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded uppercase border ${
+                      batchStatus === 'Running'
+                        ? 'bg-rose-500/20 text-rose-400 border-rose-500/30 animate-pulse'
+                        : batchStatus === 'Complete'
+                          ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                          : 'bg-red-500/20 text-red-400 border-red-500/30'
+                    }`}>
+                      {batchStatus}
+                    </span>
+                  </div>
+
+                  {batchStatus === 'Running' && (
+                    <div className="bg-black/25 p-3 rounded-xl border border-white/5 flex flex-col gap-1 text-xs">
+                      <div className="flex justify-between items-center text-slate-300">
+                        <span className="font-semibold text-rose-300">Uploading {batchCurrentIndex} of {batchTotalCount}</span>
+                        <span className="font-mono text-[10px]">{Math.round((batchCurrentIndex / batchTotalCount) * 100)}%</span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 truncate mt-0.5 font-mono">Current: <span className="text-white">{batchCurrentItemTitle}</span></p>
+                      <div className="w-full bg-white/10 h-1.5 rounded-full mt-2 overflow-hidden">
+                        <div className="bg-rose-500 h-full transition-all duration-300" style={{ width: `${(batchCurrentIndex / batchTotalCount) * 100}%` }}></div>
+                      </div>
+                    </div>
+                  )}
+
+                  {batchResults.length > 0 && (
+                    <div className="flex flex-col gap-1.5 mt-1">
+                      <p className="text-[10px] font-bold uppercase text-slate-400">Batch Results</p>
+                      <div className="flex flex-col gap-1 max-h-[150px] overflow-y-auto pr-1">
+                        {batchResults.map((res, rIdx) => (
+                          <div key={`batch-res-${res.id}-${rIdx}`} className="flex items-center justify-between text-[10px] py-1 px-2 rounded bg-black/10 border border-white/5">
+                            <span className="truncate text-slate-300 max-w-[70%]" title={res.title}>{res.title}</span>
+                            <div className="flex items-center gap-1.5">
+                              {res.status === 'Success' ? (
+                                <span className="text-[8px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded uppercase font-bold">Uploaded</span>
+                              ) : res.status === 'Failed' ? (
+                                <span className="text-[8px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded uppercase font-bold" title={res.error}>Failed</span>
+                              ) : (
+                                <span className="text-[8px] bg-yellow-500/20 text-yellow-500 px-1.5 py-0.5 rounded uppercase font-bold" title={res.reason}>Skipped</span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {batchStatus !== 'Running' && (
+                    <button
+                      type="button"
+                      onClick={() => setBatchStatus('Idle')}
+                      className="self-end px-2.5 py-1 text-[10px] text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg transition"
+                    >
+                      Dismiss Progress
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* BATCH SELECTION CONTROLS (ARC 10) */}
+              {queue.length > 0 && !dbLoading && !dbError && (
+                <div className="flex flex-col gap-2 p-4 bg-white/5 border border-white/10 rounded-2xl">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex flex-col">
+                      <span className="text-xs font-semibold text-slate-300">
+                        Selected for batch: <span className="text-rose-400 font-bold font-mono">{selectedQueueIds.length}</span>
+                      </span>
+                      <div className="flex items-center gap-2 mt-1">
+                        <input
+                          type="checkbox"
+                          id="batchStopOnError"
+                          checked={batchStopOnError}
+                          disabled={batchUploadActive}
+                          onChange={(e) => setBatchStopOnError(e.target.checked)}
+                          className="w-3.5 h-3.5 rounded border-white/25 text-rose-500 focus:ring-rose-500/20 bg-black/20 cursor-pointer"
+                        />
+                        <label htmlFor="batchStopOnError" className="text-[10px] text-slate-400 select-none cursor-pointer hover:text-white transition">
+                          Stop batch if one upload fails
+                        </label>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={selectedQueueIds.length === 0 || batchUploadActive}
+                        onClick={() => setSelectedQueueIds([])}
+                        className="px-2.5 py-1.5 text-xs text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-xl transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        Clear Selection
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleStartBatchUpload}
+                        disabled={selectedQueueIds.length === 0 || selectedQueueIds.length > 3 || batchUploadActive || !selectedYtChannel}
+                        className="px-3 py-1.5 bg-rose-500 hover:bg-rose-600 disabled:opacity-40 disabled:hover:bg-rose-500 active:scale-95 text-white text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1 shadow-lg shadow-rose-900/10"
+                        title={
+                          !selectedYtChannel 
+                            ? "Please connect your YouTube channel first" 
+                            : selectedQueueIds.length > 3 
+                              ? "Cannot upload more than 3 videos at once" 
+                              : "Upload selected items"
+                        }
+                      >
+                        <Youtube className="w-3.5 h-3.5" />
+                        <span>Upload Selected</span>
+                      </button>
+                    </div>
+                  </div>
+                  {selectedQueueIds.length > 3 && (
+                    <p className="text-[10px] text-rose-400 font-medium flex items-center gap-1 bg-rose-500/10 p-2 rounded-lg border border-rose-500/20">
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      <span>ARC 10 allows up to 3 videos per batch for safety. Please deselect some items.</span>
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -1776,6 +2122,31 @@ export default function App() {
                           
                           {/* Video Info Layout */}
                           <div className="flex items-start gap-3 flex-1 min-w-0">
+                            {/* Checkbox Selection (ARC 10) */}
+                            {!isUploaded && !simulationActive && (
+                              <div 
+                                onClick={() => handleCheckboxClick(item, !isItemSelectable(item).selectable, isItemSelectable(item).reason)}
+                                className="flex items-center justify-center self-center pr-1 shrink-0"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selectedQueueIds.includes(item.id)}
+                                  disabled={!isItemSelectable(item).selectable || batchUploadActive}
+                                  onChange={(e) => {
+                                    e.stopPropagation();
+                                    if (e.target.checked) {
+                                      setSelectedQueueIds(prev => [...prev, item.id]);
+                                    } else {
+                                      setSelectedQueueIds(prev => prev.filter(id => id !== item.id));
+                                    }
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="w-4 h-4 rounded border-white/25 text-rose-500 focus:ring-rose-500/20 focus:ring-offset-0 bg-black/20 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
+                                  title={!isItemSelectable(item).selectable ? isItemSelectable(item).reason : "Select for batch upload"}
+                                />
+                              </div>
+                            )}
+
                             {/* Mini vertical 9:16 card view representing visual cover icon */}
                             {(() => {
                               const [itemGradient, itemText] = item.thumbnail.includes('|||') 
@@ -1880,10 +2251,17 @@ export default function App() {
                                   </div>
                                 </div>
                               ) : (
-                                <span className="text-[9px] px-2 py-0.5 bg-yellow-500/20 text-yellow-500 border border-yellow-500/20 rounded uppercase font-bold flex items-center gap-1">
-                                  <Clock className="w-3 h-3" />
-                                  Scheduled
-                                </span>
+                                <div className="flex flex-col items-start md:items-end gap-1">
+                                  <span className="text-[9px] px-2 py-0.5 bg-yellow-500/20 text-yellow-500 border border-yellow-500/20 rounded uppercase font-bold flex items-center gap-1">
+                                    <Clock className="w-3 h-3" />
+                                    Scheduled
+                                  </span>
+                                  {selectedQueueIds.includes(item.id) && (
+                                    <span className="text-[8px] px-1.5 py-0.5 bg-rose-500/20 text-rose-400 border border-rose-500/25 rounded uppercase font-bold flex items-center gap-1 mt-0.5">
+                                      Selected
+                                    </span>
+                                  )}
+                                </div>
                               )}
                             </div>
  
@@ -1917,7 +2295,7 @@ export default function App() {
                                   <button
                                     type="button"
                                     onClick={() => handleUploadToYouTube(item)}
-                                    disabled={uploadingItemId !== null || readiness?.level === 'blocked'}
+                                    disabled={uploadingItemId !== null || readiness?.level === 'blocked' || batchUploadActive}
                                     className="px-2 py-1 text-[10px] text-rose-300 hover:text-white bg-rose-500/10 hover:bg-rose-500/25 border border-rose-500/20 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition flex items-center gap-1 cursor-pointer font-semibold"
                                     title={
                                       readiness?.level === 'blocked'
@@ -2008,7 +2386,7 @@ export default function App() {
               )}
             </section>
 
-            {/* UPLOAD HISTORY & ERROR LOG SECTION (ARC 9) */}
+            {/* UPLOAD HISTORY & ERROR LOG SECTION (ARC 10) */}
             <section className="bg-white/5 backdrop-blur-lg border border-white/10 p-5 rounded-3xl flex flex-col gap-4 shadow-xl">
               <div className="flex items-center justify-between pb-2 border-b border-white/10 flex-wrap gap-2 bg-white/5 -mx-5 -mt-5 px-5 py-4">
                 <div className="flex items-center gap-2">
@@ -2016,7 +2394,7 @@ export default function App() {
                   <h2 className="font-semibold text-sm uppercase tracking-wider text-white">Upload History & Error Log</h2>
                 </div>
                 <span className="text-[10px] font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 px-1.5 py-0.5 rounded-md uppercase">
-                  ARC 9 Log
+                  ARC 10 Log
                 </span>
               </div>
 
@@ -2210,7 +2588,7 @@ export default function App() {
                             <button
                               type="button"
                               onClick={() => handleUploadToYouTube(item)}
-                              disabled={uploadingItemId !== null}
+                              disabled={uploadingItemId !== null || batchUploadActive}
                               className="px-2.5 py-1 text-[10px] font-bold text-rose-300 hover:text-white bg-rose-500/10 hover:bg-rose-500/25 border border-rose-500/20 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition flex items-center gap-1 cursor-pointer"
                               title="Retry uses the existing queue item."
                             >
