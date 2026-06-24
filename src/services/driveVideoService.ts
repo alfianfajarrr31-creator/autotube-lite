@@ -9,26 +9,16 @@ export async function getDriveVideos(): Promise<DriveVideoRecord[]> {
     return [];
   }
 
-  try {
-    const { data, error } = await supabase
-      .from('drive_videos')
-      .select('*')
-      .order('created_at', { ascending: false });
+  const { data, error } = await supabase
+    .from('drive_videos')
+    .select('*')
+    .order('created_at', { ascending: false });
 
-    if (error) {
-      console.warn('Could not contact drive_videos table. Check if table SQL has been executed in the Supabase SQL Editor. Error:', error);
-      // If table is missing from schema, return empty list instead of crashing
-      if (error.message && error.message.includes("Could not find the table")) {
-        return [];
-      }
-      throw new Error(`Failed to load Drive videos from database: ${error.message}`);
-    }
-
-    return (data || []) as DriveVideoRecord[];
-  } catch (err: any) {
-    console.warn('getDriveVideos exception caught gracefully:', err);
-    return [];
+  if (error) {
+    throw new Error(`Failed to load Drive videos from database: ${error.message}`);
   }
+
+  return (data || []) as DriveVideoRecord[];
 }
 
 /**

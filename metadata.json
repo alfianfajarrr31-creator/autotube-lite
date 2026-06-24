@@ -1,6 +1,8 @@
 {
   "name": "AutoTube Lite",
-  "description": "A lightweight YouTube Shorts upload and scheduling dashboard.",
+  "description": "A lightweight YouTube Shorts upload and scheduling dashboard with ARC 4 Metadata Presets.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

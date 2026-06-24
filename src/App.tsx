@@ -38,10 +38,12 @@ import {
   Search,
   Zap,
   Play,
-  VideoOff
+  VideoOff,
+  XCircle
 } from 'lucide-react';
 import { Video, QueueItem, mapToQueueItem, mapToDbItem } from './types';
 import { INITIAL_VIDEOS, PRESET_HASHTAGS, PRESET_MOCK_COVERS } from './data/mockVideos';
+import { METADATA_PRESETS, generateTitleFromFileName } from './data/metadataPresets';
 import { isSupabaseConfigured } from './lib/supabase';
 import {
   getDriveVideos,
@@ -94,6 +96,9 @@ export default function App() {
   // Supabase Database Connection/Load State
   const [dbLoading, setDbLoading] = useState(isSupabaseConfigured);
   const [dbError, setDbError] = useState<string | null>(null);
+  const [driveSyncStatus, setDriveSyncStatus] = useState<'idle' | 'loading' | 'synced' | 'failed'>(() => {
+    return isSupabaseConfigured ? 'loading' : 'idle';
+  });
 
   // Selected Draft Video for Metadata Editing
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>('vid-1');
@@ -104,9 +109,14 @@ export default function App() {
   const [ytDescription, setYtDescription] = useState('An incredible theory exploring Joy Boy secret. What was his true identity in the Void Century?');
   const [ytHashtags, setYtHashtags] = useState('#shorts #onepiece #animefacts');
   const [ytCoverGradient, setYtCoverGradient] = useState('bg-gradient-to-br from-amber-500 via-orange-600 to-rose-600');
+  const [ytThumbnailText, setYtThumbnailText] = useState('');
   const [ytVisibility, setYtVisibility] = useState<'Private' | 'Unlisted' | 'Public'>('Public');
   const [ytPublishDate, setYtPublishDate] = useState('2026-06-23');
   const [ytPublishTime, setYtPublishTime] = useState('12:00');
+
+  // Metadata Preset states
+  const [selectedPresetIndex, setSelectedPresetIndex] = useState(0);
+  const [selectedThumbnailText, setSelectedThumbnailText] = useState(METADATA_PRESETS[0]?.thumbnailTextOptions[0] || '');
 
   // Interactive Upload simulation state
   const [simulationActive, setSimulationActive] = useState(false);
@@ -138,10 +148,12 @@ export default function App() {
   const fetchQueue = async () => {
     if (!isSupabaseConfigured) {
       setDbLoading(false);
+      setDriveSyncStatus('idle');
       return;
     }
     setDbLoading(true);
     setDbError(null);
+    setDriveSyncStatus('loading');
     try {
       const dbQueue = await getUploadQueue();
       const mappedQueue = dbQueue.map(mapToQueueItem);
@@ -184,9 +196,11 @@ export default function App() {
           return { ...v, status: v.status || 'Draft' };
         });
       });
+      setDriveSyncStatus('synced');
     } catch (err: any) {
       setDbError(err.message || 'Unknown database error occurred');
       showNotification('Failed to load data from Supabase', 'error');
+      setDriveSyncStatus('failed');
     } finally {
       setDbLoading(false);
     }
@@ -205,6 +219,7 @@ export default function App() {
     setSelectedVideoId(video.id);
     setYtTitle(video.title + (video.title.includes('#shorts') ? '' : ' 🔥'));
     setYtDescription(`Exploring the details for: ${video.title}. Created in demo only workspace.`);
+    setYtThumbnailText('');
     
     // Assign suitable initial hashtags depending on the video!
     if (video.title.toLowerCase().includes('one piece') || video.title.toLowerCase().includes('luffy') || video.title.toLowerCase().includes('dadan')) {
@@ -224,6 +239,62 @@ export default function App() {
     setYtPublishTime('12:00');
 
     showNotification(`Selected draft: "${video.title}"`);
+  };
+
+  const handlePresetChange = (index: number) => {
+    setSelectedPresetIndex(index);
+    const preset = METADATA_PRESETS[index];
+    if (preset && preset.thumbnailTextOptions.length > 0) {
+      setSelectedThumbnailText(preset.thumbnailTextOptions[0]);
+    } else {
+      setSelectedThumbnailText('');
+    }
+  };
+
+  const handleApplyPreset = () => {
+    const preset = METADATA_PRESETS[selectedPresetIndex];
+    if (!preset) return;
+    
+    // Fill description and hashtags
+    setYtDescription(preset.description);
+    setYtHashtags(preset.hashtags);
+    setYtThumbnailText(selectedThumbnailText);
+    
+    // If YouTube title is empty, generate a clean title from selected video's title or file name
+    if (!ytTitle.trim() && selectedVideoObj) {
+      const source = selectedVideoObj.fileName || selectedVideoObj.title;
+      const cleanTitle = generateTitleFromFileName(source);
+      setYtTitle(cleanTitle);
+    }
+    
+    showNotification(`Applied metadata preset: "${preset.name}"`);
+  };
+
+  const handleApplyHashtagsOnly = () => {
+    const preset = METADATA_PRESETS[selectedPresetIndex];
+    if (!preset) return;
+    setYtHashtags(preset.hashtags);
+    showNotification(`Applied hashtags only from "${preset.name}"`);
+  };
+
+  const handleApplyDescriptionOnly = () => {
+    const preset = METADATA_PRESETS[selectedPresetIndex];
+    if (!preset) return;
+    setYtDescription(preset.description);
+    showNotification(`Applied description only from "${preset.name}"`);
+  };
+
+  const handleApplyThumbnailTextOnly = () => {
+    setYtThumbnailText(selectedThumbnailText);
+    showNotification(`Applied thumbnail text overlay: "${selectedThumbnailText}"`);
+  };
+
+  const handleClearMetadata = () => {
+    setYtTitle('');
+    setYtDescription('');
+    setYtHashtags('');
+    setYtThumbnailText('');
+    showNotification('Cleared video title, description, hashtags, and thumbnail text');
   };
 
   // Quick Stats computation
@@ -436,7 +507,7 @@ export default function App() {
       youtubeTitle: ytTitle,
       description: ytDescription,
       hashtags: ytHashtags,
-      thumbnail: ytCoverGradient,
+      thumbnail: ytThumbnailText ? `${ytCoverGradient}|||${ytThumbnailText}` : ytCoverGradient,
       visibility: ytVisibility,
       publishDate: ytPublishDate || '2026-06-24',
       publishTime: ytPublishTime || '12:00',
@@ -649,18 +720,32 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-bold font-display tracking-tight text-white">AutoTube Lite</h1>
                 <span className="text-[10px] font-mono font-bold bg-purple-500/20 text-purple-400 border border-purple-500/30 px-1.5 py-0.5 rounded-md uppercase animate-pulse">
-                  ARC 2 Prototype
+                  ARC 4 Metadata Presets
                 </span>
               </div>
-              <p className="text-xs text-slate-400">YouTube Shorts Upload & Scheduler (Supabase Edition)</p>
+              <p className="text-xs text-slate-400">Google Drive + YouTube Shorts Scheduler</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             {isSupabaseConfigured ? (
-              <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-xl text-xs font-mono text-emerald-400">
-                <CloudLightning className="w-3.5 h-3.5 text-emerald-400 animate-bounce" />
-                <span>Supabase Connected</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-xl text-xs font-mono text-emerald-400">
+                  <CloudLightning className="w-3.5 h-3.5 text-emerald-400 animate-bounce" />
+                  <span>Supabase Connected</span>
+                </div>
+                {driveSyncStatus === 'synced' && (
+                  <div className="flex items-center gap-1.5 bg-sky-500/10 border border-sky-500/20 px-3 py-1.5 rounded-xl text-xs font-mono text-sky-400">
+                    <CheckCircle className="w-3.5 h-3.5 text-sky-400" />
+                    <span>Drive Bank Synced</span>
+                  </div>
+                )}
+                {driveSyncStatus === 'failed' && (
+                  <div className="flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/20 px-3 py-1.5 rounded-xl text-xs font-mono text-amber-500" title="Drive sync failed">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Drive Bank sync failed. You can still use local demo mode.</span>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 px-3 py-1.5 rounded-xl text-xs font-mono text-amber-500" title="Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to persist uploads">
@@ -902,9 +987,19 @@ export default function App() {
               <div className="bg-blue-500/5 border border-blue-500/10 rounded-xl p-3 text-xs text-blue-300 flex items-start gap-2">
                 <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
                 <p className="leading-normal">
-                  Drive videos are saved after selection and will remain available after refresh.
+                  Drive videos are saved to your AutoTube Lite bank after selection and will stay available after refresh.
                 </p>
               </div>
+
+              {/* No Google Drive Videos Saved yet Alert */}
+              {videos.filter(v => v.source === 'drive').length === 0 && (
+                <div className="bg-amber-500/5 border border-amber-500/10 rounded-xl p-3 text-xs text-amber-300 flex items-start gap-2">
+                  <Film className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                  <p className="leading-normal">
+                    Pick videos from Google Drive to build your reusable Drive Bank.
+                  </p>
+                </div>
+              )}
 
               {/* SEARCH & FILTERS */}
               <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-xl px-3 py-2">
@@ -998,10 +1093,10 @@ export default function App() {
                                   await handleRemoveDriveVideo(video.id);
                                 }}
                                 className="p-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border border-red-500/20 rounded-lg text-[10px] flex items-center justify-center gap-1 cursor-pointer font-bold px-1.5 transition-colors"
-                                title="Remove from Bank (Does not delete Google Drive file)"
+                                title="This only removes the video from AutoTube Lite, not from Google Drive."
                               >
                                 <Trash2 className="w-3 h-3 text-red-400" />
-                                <span>Remove</span>
+                                <span>Remove from Bank</span>
                               </button>
                             )}
 
@@ -1101,7 +1196,7 @@ export default function App() {
                   </div>
                   <p className="text-sm font-semibold text-slate-200">Queue is empty</p>
                   <p className="text-xs text-slate-400 max-w-sm mt-1">
-                    Select any video draft in the Draft Videos above, update the metadata, and choose "Add to Queue" to build your schedule!
+                    Your upload queue is empty. Add videos after filling metadata and schedule.
                   </p>
                 </div>
               ) : (
@@ -1123,12 +1218,25 @@ export default function App() {
                         {/* Video Info Layout */}
                         <div className="flex items-start gap-3 flex-1 min-w-0">
                           {/* Mini vertical 9:16 card view representing visual cover icon */}
-                          <div className={`w-10 h-16 rounded-md ${item.thumbnail} flex flex-col justify-between p-1 text-[8px] font-mono shrink-0 shadow-sm border border-white/10 relative overflow-hidden`}>
-                            <span className="bg-black/60 text-white rounded px-0.5 self-start text-[6px]">SHORTS</span>
-                            <span className="text-[6px] text-white/90 truncate bg-slate-900/45 px-0.5 rounded text-center block max-w-full">
-                              {item.duration}
-                            </span>
-                          </div>
+                          {(() => {
+                            const [itemGradient, itemText] = item.thumbnail.includes('|||') 
+                              ? item.thumbnail.split('|||') 
+                              : [item.thumbnail, ''];
+                            return (
+                              <div className={`w-10 h-16 rounded-md ${itemGradient} flex flex-col justify-between p-1 text-[8px] font-mono shrink-0 shadow-sm border border-white/10 relative overflow-hidden`}>
+                                {itemText ? (
+                                  <span className="absolute inset-x-0 top-0.5 text-[5px] text-yellow-300 font-extrabold uppercase truncate bg-black/75 px-0.5 text-center leading-normal">
+                                    {itemText}
+                                  </span>
+                                ) : (
+                                  <span className="bg-black/60 text-white rounded px-0.5 self-start text-[6px]">SHORTS</span>
+                                )}
+                                <span className="text-[6px] text-white/90 truncate bg-slate-900/45 px-0.5 rounded text-center block max-w-full z-10">
+                                  {item.duration}
+                                </span>
+                              </div>
+                            );
+                          })()}
 
                           <div className="flex-1 min-w-0">
                             <h3 className="text-xs font-bold text-white leading-tight truncate pr-6" title={item.youtubeTitle}>
@@ -1223,6 +1331,16 @@ export default function App() {
                     
                     {/* Background decoration representing camera grid overlay or depth */}
                     <div className="absolute inset-0 bg-black/15 mix-blend-overlay pointer-events-none"></div>
+                    
+                    {/* Thumbnail Text Overlay */}
+                    {ytThumbnailText && (
+                      <div className="absolute inset-x-2 top-10 text-center z-10 pointer-events-none">
+                        <span className="inline-block bg-black/85 text-yellow-400 font-extrabold text-[10px] px-2 py-1.5 rounded-lg border border-yellow-500/30 uppercase tracking-wider shadow-lg max-w-[170px] break-words">
+                          {ytThumbnailText}
+                        </span>
+                      </div>
+                    )}
+
                     <div className="absolute top-2 left-2 right-2 flex justify-between items-center text-[8px] font-mono bg-black/50 text-white/90 backdrop-blur-md px-2 py-0.5 rounded-lg pointer-events-none border border-white/5">
                       <span className="flex items-center gap-1">
                         <Youtube className="w-2.5 h-2.5 text-red-500 shrink-0" />
@@ -1282,7 +1400,7 @@ export default function App() {
                   </div>
                   <p className="text-xs font-semibold text-slate-200">No Draft Selected</p>
                   <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
-                    Choose a draft video from the bank above to customize its metadata and scheduling options. Demo only.
+                    Select a video from your Drive Bank or demo videos to prepare metadata.
                   </p>
                 </div>
               ) : (
@@ -1297,6 +1415,109 @@ export default function App() {
                     <span className="bg-white/10 text-slate-200 border border-white/10 rounded px-2.5 py-1 font-mono shrink-0 font-bold ml-2">
                       {selectedVideoObj.duration}
                     </span>
+                  </div>
+
+                  {/* Metadata Preset Section */}
+                  <div className="p-4 bg-white/[0.04] border border-white/[0.08] rounded-2xl flex flex-col gap-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                        Metadata Preset
+                      </h3>
+                      <span className="text-[9px] text-purple-400 bg-purple-500/10 border border-purple-500/20 px-1.5 py-0.5 rounded uppercase font-bold tracking-wide">
+                        ARC 4
+                      </span>
+                    </div>
+
+                    <p className="text-[10px] text-slate-400 leading-normal">
+                      Presets help you fill metadata faster. You can still edit everything manually.
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {/* Preset Select */}
+                      <div>
+                        <label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Preset Template</label>
+                        <select
+                          value={selectedPresetIndex}
+                          onChange={(e) => handlePresetChange(Number(e.target.value))}
+                          className="w-full bg-black/40 border border-white/10 focus:border-purple-500/50 rounded-lg px-2 py-1.5 text-xs text-white outline-none transition cursor-pointer"
+                        >
+                          {METADATA_PRESETS.map((preset, index) => (
+                            <option key={preset.name} value={index} className="bg-[#15181e] text-white">
+                              {preset.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Thumbnail Text Select */}
+                      <div>
+                        <label className="block text-[9px] uppercase font-bold text-slate-400 mb-1">Thumbnail Cover Text</label>
+                        <select
+                          value={selectedThumbnailText}
+                          onChange={(e) => setSelectedThumbnailText(e.target.value)}
+                          className="w-full bg-black/40 border border-white/10 focus:border-purple-500/50 rounded-lg px-2 py-1.5 text-xs text-white outline-none transition cursor-pointer"
+                        >
+                          {METADATA_PRESETS[selectedPresetIndex]?.thumbnailTextOptions.map((opt) => (
+                            <option key={opt} value={opt} className="bg-[#15181e] text-white">
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      <button
+                        type="button"
+                        onClick={handleApplyPreset}
+                        className="flex-1 min-w-[120px] bg-purple-650 hover:bg-purple-700 active:bg-purple-800 text-white font-bold py-1.5 px-3 rounded-xl text-[10px] transition uppercase tracking-wider shadow-md hover:shadow-purple-900/10 cursor-pointer"
+                      >
+                        Apply Preset
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleClearMetadata}
+                        className="bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 font-bold py-1.5 px-3 rounded-xl text-[10px] transition uppercase tracking-wider cursor-pointer"
+                      >
+                        Clear Metadata
+                      </button>
+                    </div>
+
+                    {/* Modular apply buttons */}
+                    <div className="grid grid-cols-3 gap-1.5 mt-0.5">
+                      <button
+                        type="button"
+                        onClick={handleApplyDescriptionOnly}
+                        className="py-1 px-1.5 bg-white/[0.03] hover:bg-white/[0.08] active:bg-white/[0.12] border border-white/5 hover:border-white/10 rounded-lg text-[9px] font-medium text-slate-300 transition cursor-pointer text-center"
+                        title="Apply only description template"
+                      >
+                        Desc Only
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleApplyHashtagsOnly}
+                        className="py-1 px-1.5 bg-white/[0.03] hover:bg-white/[0.08] active:bg-white/[0.12] border border-white/5 hover:border-white/10 rounded-lg text-[9px] font-medium text-slate-300 transition cursor-pointer text-center"
+                        title="Apply only hashtags template"
+                      >
+                        Hashtags Only
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleApplyThumbnailTextOnly}
+                        className="py-1 px-1.5 bg-white/[0.03] hover:bg-white/[0.08] active:bg-white/[0.12] border border-white/5 hover:border-white/10 rounded-lg text-[9px] font-medium text-slate-300 transition cursor-pointer text-center"
+                        title="Apply only thumbnail cover text"
+                      >
+                        Cover Only
+                      </button>
+                    </div>
+
+                    {/* Small disabled future note */}
+                    <div className="flex items-center gap-1.5 mt-1 border-t border-white/5 pt-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-slate-500"></span>
+                      <span className="text-[9px] text-slate-400 font-medium">AI Metadata Generator — Later</span>
+                    </div>
                   </div>
 
                   {/* YouTube title input */}
@@ -1396,6 +1617,24 @@ export default function App() {
                         );
                       })}
                     </div>
+                  </div>
+
+                  {/* Thumbnail Cover Text Overlay Input */}
+                  <div>
+                    <div className="flex justify-between items-center text-xs mb-1">
+                      <label className="text-[10px] uppercase font-bold text-slate-400">Thumbnail Cover Text Overlay</label>
+                      <span className={`font-mono text-[10px] ${ytThumbnailText.length > 50 ? 'text-red-400' : 'text-slate-400'}`}>
+                        {ytThumbnailText.length}/50 chars
+                      </span>
+                    </div>
+                    <input 
+                      type="text" 
+                      value={ytThumbnailText}
+                      onChange={(e) => setYtThumbnailText(e.target.value)}
+                      placeholder="e.g. INI MASUK AKAL?, DARI NOL JADI MEWAH"
+                      className="w-full bg-black/40 border border-white/10 focus:border-red-500/50 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 outline-none transition"
+                      maxLength={50}
+                    />
                   </div>
 
                   {/* Visibility Select */}

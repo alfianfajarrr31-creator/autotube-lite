@@ -1,8 +1,20 @@
-# AutoTube Lite ARC 3.1 — Google Drive Script Loader Fix
+# AutoTube Lite ARC 4 — Metadata Template & Preset
 
-AutoTube Lite is a lightweight YouTube Shorts upload and scheduling dashboard. 
+AutoTube Lite is a lightweight YouTube Shorts upload and scheduling dashboard.
 
-With **ARC 3.1**, dynamic loading of Google Client Libraries has been completely revamped to ensure seamless, reliable initialization on production hosting platforms like Vercel. 
+With **ARC 4**, we have introduced non-AI **Metadata Templates & Presets** allowing you to apply pre-defined, standardized metadata (such as Descriptions, Hashtags, and stylized Thumbnail Text Overlays) to your draft videos rapidly.
+
+### 📝 Key Features in ARC 4
+- **Interactive Metadata Presets**: Apply standardized metadata presets (gaming, anime, tutorial, daily vlog, and tech review) in one click.
+- **Visual Thumbnail Text Overlay**: View your chosen thumbnail overlay text on the live 9:16 Shorts cover preview and on scheduled queue items.
+- **Title Auto-Generation**: Clean title auto-generation from selected video file names or titles (capitalizes first letters, removes file extensions and underscores/dashes).
+- **Flexible Manual Customization**: Apply presets partially (description only, hashtags only, or cover text only) or fully, while keeping full manual editing capabilities intact.
+- **Clear Metadata Action**: Clear form input fields in a single click without affecting scheduling details or selected videos.
+
+### ⚙️ Constraints and Requirements
+- **No AI Dependency**: Built with lightning-fast static templates and local utilities to completely bypass slow or expensive AI API dependencies (no Gemini/OpenAI/Claude API integration, no new dependencies).
+- **No Database Schema Changes**: Leverages the existing `upload_queue` table columns securely (storing both gradient and overlay text natively under `thumbnail_text`).
+- **No New Environment Variables**: No extra API keys or variables are needed. Standard Supabase and Google Drive env variables remain required to enable video bank and queue persistence.
 
 ---
 
