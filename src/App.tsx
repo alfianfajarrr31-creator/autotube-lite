@@ -158,6 +158,17 @@ export default function App() {
   const [batchStopOnError, setBatchStopOnError] = useState(true);
   const [batchResults, setBatchResults] = useState<{ id: string; title: string; status: 'Success' | 'Failed' | 'Skipped'; error?: string; reason?: string }[]>([]);
 
+  // ARC 11 Schedule Planning states
+  const [planningFilter, setPlanningFilter] = useState<'Today' | 'This Week' | 'All Planned' | 'Missing Schedule'>('This Week');
+  const [weeklyShortsTarget, setWeeklyShortsTarget] = useState<number>(() => {
+    const saved = localStorage.getItem('weeklyShortsTarget');
+    return saved ? parseInt(saved, 10) : 14;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('weeklyShortsTarget', String(weeklyShortsTarget));
+  }, [weeklyShortsTarget]);
+
   // Quick form state for "Creating own custom mocked Video"
   const [isAddMockOpen, setIsAddMockOpen] = useState(false);
   const [mockVidTitle, setMockVidTitle] = useState('');
@@ -484,6 +495,86 @@ export default function App() {
       return true;
     });
   }, [queue, historyFilter, historySearch]);
+
+  // ARC 11 Schedule Planning computations
+  const todayStr = useMemo(() => {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }, []);
+
+  const sevenDaysLaterStr = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }, []);
+
+  const filteredPlanningItems = useMemo(() => {
+    return queue.filter(item => {
+      if (planningFilter === 'Today') {
+        return item.publishDate === todayStr;
+      } else if (planningFilter === 'This Week') {
+        return item.publishDate && item.publishDate >= todayStr && item.publishDate <= sevenDaysLaterStr;
+      } else if (planningFilter === 'All Planned') {
+        return !!item.publishDate;
+      } else if (planningFilter === 'Missing Schedule') {
+        return !item.publishDate || !item.publishTime;
+      }
+      return true;
+    });
+  }, [queue, planningFilter, todayStr, sevenDaysLaterStr]);
+
+  const groupedPlanningItems = useMemo(() => {
+    const groups: { [key: string]: QueueItem[] } = {};
+    filteredPlanningItems.forEach(item => {
+      const dateKey = item.publishDate || 'Missing Schedule / No Date Set';
+      if (!groups[dateKey]) {
+        groups[dateKey] = [];
+      }
+      groups[dateKey].push(item);
+    });
+
+    const sortedKeys = Object.keys(groups).sort((a, b) => {
+      if (a === 'Missing Schedule / No Date Set') return 1;
+      if (b === 'Missing Schedule / No Date Set') return -1;
+      return a.localeCompare(b);
+    });
+
+    return sortedKeys.map(key => ({
+      date: key,
+      items: groups[key]
+    }));
+  }, [filteredPlanningItems]);
+
+  const planningStats = useMemo(() => {
+    const plannedToday = queue.filter(q => q.publishDate === todayStr).length;
+    const plannedThisWeek = queue.filter(q => q.publishDate && q.publishDate >= todayStr && q.publishDate <= sevenDaysLaterStr).length;
+    const missingSchedule = queue.filter(q => !q.publishDate || !q.publishTime).length;
+    const uploaded = queue.filter(q => q.status === 'Uploaded').length;
+
+    return {
+      plannedToday,
+      plannedThisWeek,
+      missingSchedule,
+      uploaded
+    };
+  }, [queue, todayStr, sevenDaysLaterStr]);
+
+  const scheduleConflicts = useMemo(() => {
+    const keyCounts: { [key: string]: number } = {};
+    queue.forEach(item => {
+      if (item.publishDate && item.publishTime) {
+        const key = `${item.publishDate} ${item.publishTime}`;
+        keyCounts[key] = (keyCounts[key] || 0) + 1;
+      }
+    });
+    return keyCounts;
+  }, [queue]);
 
   const getReadinessForItem = (itemId: string) => {
     return readinessResults.find(entry => entry.item.id === itemId)?.result;
@@ -1325,7 +1416,7 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-bold font-display tracking-tight text-white">AutoTube Lite</h1>
                 <span className="text-[10px] font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 px-1.5 py-0.5 rounded-md uppercase animate-pulse">
-                  ARC 10 Manual Batch Upload
+                  ARC 11 Schedule Planning
                 </span>
               </div>
               <p className="text-xs text-slate-400">Google Drive + YouTube Shorts Scheduler</p>
@@ -3003,7 +3094,304 @@ export default function App() {
           </div>
 
         </div>
-        
+
+        {/* SCHEDULE PLANNING SECTION (ARC 11) */}
+        <section className="bg-white/5 backdrop-blur-lg border border-white/10 p-6 rounded-3xl flex flex-col gap-6 shadow-xl" id="schedule-planning">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-white/10">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400">
+                <Calendar className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="font-bold text-lg text-white font-display tracking-tight">Schedule Planning</h2>
+                  <span className="text-[10px] font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 px-1.5 py-0.5 rounded-md uppercase">
+                    ARC 11 Plan
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5">Organize, review, and analyze planned YouTube Shorts uploads before publishing.</p>
+              </div>
+            </div>
+
+            {/* Target Settings Widget */}
+            <div className="flex items-center gap-3 bg-white/5 border border-white/10 p-3 rounded-2xl shrink-0">
+              <TrendingUp className="w-4 h-4 text-rose-400 shrink-0" />
+              <div className="flex flex-col">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Weekly Shorts Target</span>
+                <div className="flex items-center gap-2 mt-1">
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={weeklyShortsTarget}
+                    onChange={(e) => setWeeklyShortsTarget(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-14 bg-black/40 border border-white/15 focus:border-rose-500/50 rounded-lg px-2 py-0.5 text-center text-xs font-mono text-white outline-none transition"
+                  />
+                  <span className="text-[11px] text-slate-300 font-medium">videos / week</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Planning Insights & Quick Metrics Row */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+            {/* Today card */}
+            <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/5 hover:bg-white/[0.05] transition flex flex-col gap-1 justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Planned Today</span>
+              <div className="flex items-baseline gap-2 mt-1">
+                <span className="text-2xl font-bold text-white font-mono">{planningStats.plannedToday}</span>
+                <span className="text-xs text-slate-400">Shorts</span>
+              </div>
+              <div className="w-full bg-white/10 h-1 rounded-full overflow-hidden mt-1.5">
+                <div className="bg-rose-500 h-full" style={{ width: `${planningStats.plannedToday > 0 ? 100 : 0}%` }}></div>
+              </div>
+            </div>
+
+            {/* This Week card */}
+            <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/5 hover:bg-white/[0.05] transition flex flex-col gap-1 justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Planned This Week</span>
+              <div className="flex items-baseline gap-2 mt-1">
+                <span className="text-2xl font-bold text-sky-400 font-mono">{planningStats.plannedThisWeek}</span>
+                <span className="text-xs text-slate-400">Shorts</span>
+              </div>
+              <div className="w-full bg-white/10 h-1 rounded-full overflow-hidden mt-1.5">
+                <div className="bg-sky-400 h-full" style={{ width: `${Math.min(100, (planningStats.plannedThisWeek / weeklyShortsTarget) * 100)}%` }}></div>
+              </div>
+            </div>
+
+            {/* Missing Schedule card */}
+            <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/5 hover:bg-white/[0.05] transition flex flex-col gap-1 justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Missing Schedule</span>
+              <div className="flex items-baseline gap-2 mt-1">
+                <span className="text-2xl font-bold text-amber-500 font-mono">{planningStats.missingSchedule}</span>
+                <span className="text-xs text-slate-400">Need Dates</span>
+              </div>
+              <div className="w-full bg-white/10 h-1 rounded-full overflow-hidden mt-1.5">
+                <div className="bg-amber-500 h-full" style={{ width: `${planningStats.missingSchedule > 0 ? 100 : 0}%` }}></div>
+              </div>
+            </div>
+
+            {/* Uploaded card */}
+            <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/5 hover:bg-white/[0.05] transition flex flex-col gap-1 justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Uploaded</span>
+              <div className="flex items-baseline gap-2 mt-1">
+                <span className="text-2xl font-bold text-emerald-400 font-mono">{planningStats.uploaded}</span>
+                <span className="text-xs text-slate-400">Published</span>
+              </div>
+              <div className="w-full bg-white/10 h-1 rounded-full overflow-hidden mt-1.5">
+                <div className="bg-emerald-400 h-full" style={{ width: `${planningStats.uploaded > 0 ? 100 : 0}%` }}></div>
+              </div>
+            </div>
+
+            {/* Weekly Target Helper & Planning Insights Card */}
+            <div className="p-3.5 rounded-2xl bg-gradient-to-br from-rose-500/10 to-purple-600/10 border border-rose-500/20 hover:border-rose-500/30 transition flex flex-col gap-1 justify-between sm:col-span-2 md:col-span-1">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-rose-300 font-semibold">Target Insights</span>
+                <p className="text-xs font-semibold text-white mt-1">
+                  {planningStats.plannedThisWeek} of {weeklyShortsTarget} planned
+                </p>
+              </div>
+              <p className="text-[10px] text-slate-300 font-medium leading-normal mt-1 bg-black/20 p-1.5 rounded-lg border border-white/5">
+                {weeklyShortsTarget - planningStats.plannedThisWeek > 0 ? (
+                  <span>You still need <span className="text-rose-400 font-bold font-mono">{weeklyShortsTarget - planningStats.plannedThisWeek}</span> more planned videos this week.</span>
+                ) : weeklyShortsTarget === planningStats.plannedThisWeek ? (
+                  <span className="text-emerald-400 font-bold">Weekly target reached.</span>
+                ) : (
+                  <span className="text-purple-300 font-bold">You are above your weekly target.</span>
+                )}
+              </p>
+            </div>
+          </div>
+
+          {/* Filtering Controls */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white/[0.02] border border-white/10 p-3 rounded-2xl">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-slate-400 font-medium uppercase tracking-wider">Show Schedule:</span>
+              <div className="flex flex-wrap items-center gap-1.5 bg-black/20 p-1 rounded-xl border border-white/5">
+                {(['Today', 'This Week', 'All Planned', 'Missing Schedule'] as const).map((filterOpt) => (
+                  <button
+                    key={filterOpt}
+                    type="button"
+                    onClick={() => setPlanningFilter(filterOpt)}
+                    className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                      planningFilter === filterOpt
+                        ? 'bg-rose-500 text-white shadow-md shadow-rose-950/20'
+                        : 'text-slate-400 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    {filterOpt}
+                  </button>
+                ))}
+              </div>
+            </div>
+            
+            <div className="text-[10px] text-slate-400 font-mono">
+              Displaying <span className="text-white font-bold">{filteredPlanningItems.length}</span> of <span className="text-white font-bold">{queue.length}</span> queue items
+            </div>
+          </div>
+
+          {/* Grouped Items List */}
+          <div className="flex flex-col gap-4">
+            {groupedPlanningItems.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 px-4 bg-white/[0.02] border border-white/5 rounded-3xl text-center gap-3 animate-fadeIn">
+                <div className="w-12 h-12 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center text-slate-500">
+                  <Calendar className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-300">No scheduled videos match filter</h4>
+                  <p className="text-xs text-slate-500 mt-1 font-medium">There are no items matching "{planningFilter}" at the moment.</p>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {groupedPlanningItems.map((group) => (
+                  <div key={`group-${group.date}`} className="flex flex-col gap-3 animate-fadeIn">
+                    {/* Group Header */}
+                    <div className="flex items-center gap-2 pb-1 border-b border-white/5">
+                      <div className="w-1.5 h-4 bg-rose-500 rounded-full"></div>
+                      <h3 className="font-bold text-xs uppercase tracking-wider text-slate-300 font-mono">
+                        {group.date === 'Missing Schedule / No Date Set' ? (
+                          <span className="text-amber-400 flex items-center gap-1.5">
+                            <AlertTriangle className="w-3.5 h-3.5" />
+                            Unscheduled & Draft Items ({group.items.length})
+                          </span>
+                        ) : (
+                          <span>Publish Date: {group.date} ({group.items.length} {group.items.length === 1 ? 'Short' : 'Shorts'})</span>
+                        )}
+                      </h3>
+                    </div>
+
+                    {/* Group Items Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {group.items.map((item) => {
+                        const readiness = getReadinessForItem(item.id);
+                        const hasConflict = item.publishDate && item.publishTime && scheduleConflicts[`${item.publishDate} ${item.publishTime}`] > 1;
+                        const isMissing = !item.publishDate || !item.publishTime;
+
+                        // thumbnail extract
+                        const [gradient, thumbText] = item.thumbnail.includes('|||')
+                          ? item.thumbnail.split('|||')
+                          : ['from-rose-500 to-purple-600', item.thumbnail || 'SHORTS'];
+
+                        return (
+                          <div 
+                            key={`planning-item-${item.id}`}
+                            className={`p-4 bg-white/[0.02] hover:bg-white/[0.04] border rounded-2xl flex gap-3.5 transition duration-200 ${
+                              hasConflict 
+                                ? 'border-amber-500/30 shadow-lg shadow-amber-950/5' 
+                                : isMissing 
+                                  ? 'border-amber-500/20' 
+                                  : 'border-white/5'
+                            }`}
+                          >
+                            {/* Visual Thumbnail representation */}
+                            <div className="w-16 h-28 rounded-xl bg-gradient-to-tr flex-shrink-0 relative overflow-hidden flex flex-col justify-between p-1.5 text-center shadow-inner border border-white/10" style={{ backgroundImage: `linear-gradient(to top right, ${gradient.replace('from-', '#').replace('to-', '#')})` || undefined }}>
+                              <div className="w-full h-full absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/60 pointer-events-none"></div>
+                              <span className="text-[7px] font-bold text-white uppercase tracking-widest z-10 truncate bg-black/20 py-0.5 rounded px-1">{item.duration}</span>
+                              <p className="text-[8px] font-black tracking-tighter text-white uppercase leading-none z-10 line-clamp-3 select-none break-words">{thumbText}</p>
+                              <span className="text-[6px] text-slate-300 font-semibold z-10 tracking-widest uppercase truncate">{item.visibility}</span>
+                            </div>
+
+                            {/* Details Column */}
+                            <div className="flex-1 min-w-0 flex flex-col justify-between gap-2">
+                              <div>
+                                <h4 className="font-bold text-xs text-white truncate" title={item.videoTitle}>{item.videoTitle}</h4>
+                                <p className="text-[11px] text-slate-400 truncate mt-0.5" title={item.youtubeTitle}>
+                                  YT: <span className="text-slate-300 font-medium">{item.youtubeTitle}</span>
+                                </p>
+                                
+                                {/* Meta Badges */}
+                                <div className="flex flex-wrap gap-1.5 mt-2">
+                                  {/* Time Badge */}
+                                  <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 text-[9px] font-mono text-slate-300">
+                                    <Clock className="w-3 h-3 text-slate-400" />
+                                    <span>{item.publishTime || '--:--'}</span>
+                                  </div>
+
+                                  {/* Visibility Badge */}
+                                  <div className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase ${
+                                    item.visibility === 'Public'
+                                      ? 'bg-emerald-500/10 text-emerald-400'
+                                      : item.visibility === 'Unlisted'
+                                        ? 'bg-blue-500/10 text-blue-400'
+                                        : 'bg-slate-500/10 text-slate-400'
+                                  }`}>
+                                    {item.visibility}
+                                  </div>
+
+                                  {/* Readiness Badge */}
+                                  <div className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase ${
+                                    readiness?.level === 'ready'
+                                      ? 'bg-emerald-500/10 text-emerald-400'
+                                      : readiness?.level === 'warning'
+                                        ? 'bg-amber-500/10 text-amber-400'
+                                        : 'bg-rose-500/10 text-rose-400'
+                                  }`}>
+                                    {readiness?.level || 'checking'}
+                                  </div>
+
+                                  {/* Status Badge */}
+                                  <div className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase ${
+                                    item.status === 'Uploaded'
+                                      ? 'bg-emerald-500/10 text-emerald-400'
+                                      : item.status === 'Failed'
+                                        ? 'bg-rose-500/10 text-rose-400'
+                                        : 'bg-yellow-500/10 text-yellow-500'
+                                  }`}>
+                                    {item.status}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Warnings & Messages block */}
+                              <div className="flex flex-col gap-1.5 mt-1">
+                                {hasConflict && (
+                                  <div className="flex flex-col gap-0.5 p-1.5 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                                    <span className="text-[8px] uppercase font-bold text-amber-400 flex items-center gap-1 font-semibold">
+                                      <AlertTriangle className="w-3 h-3" />
+                                      Schedule Conflict
+                                    </span>
+                                    <p className="text-[9px] text-amber-200/90 leading-tight">Another video is planned at the same date and time.</p>
+                                  </div>
+                                )}
+
+                                {isMissing && (
+                                  <div className="flex flex-col gap-0.5 p-1.5 bg-amber-500/10 border border-amber-500/15 rounded-lg">
+                                    <span className="text-[8px] uppercase font-bold text-amber-400 flex items-center gap-1 font-semibold">
+                                      <AlertTriangle className="w-3 h-3" />
+                                      Missing Schedule
+                                    </span>
+                                    <p className="text-[9px] text-amber-200/90 leading-tight">Add publish date and time in the metadata editor before planning weekly uploads.</p>
+                                  </div>
+                                )}
+
+                                {item.status === 'Uploaded' && item.youtubeVideoUrl && (
+                                  <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/15 p-1.5 rounded-lg text-[9px] text-emerald-300 font-medium">
+                                    <span className="truncate">Uploaded live to YouTube!</span>
+                                    <a 
+                                      href={item.youtubeVideoUrl} 
+                                      target="_blank" 
+                                      rel="noopener noreferrer" 
+                                      className="text-emerald-400 hover:underline font-bold flex items-center gap-0.5 shrink-0 ml-1.5"
+                                    >
+                                      <span>View</span>
+                                      <ChevronRight className="w-3 h-3" />
+                                    </a>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+
         {/* DOCUMENTATION & HELPFUL WALKTHROUGH NOTES */}
         <section className="bg-white/5 backdrop-blur-lg border border-white/10 p-5 rounded-3xl shadow-xl">
           <h2 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5 mb-3">
