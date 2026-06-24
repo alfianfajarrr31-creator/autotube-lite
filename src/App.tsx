@@ -42,7 +42,8 @@ import {
   XCircle,
   Users,
   LogOut,
-  Copy
+  Copy,
+  History
 } from 'lucide-react';
 import { Video, QueueItem, mapToQueueItem, mapToDbItem } from './types';
 import { checkUploadReadiness } from './utils/uploadReadiness';
@@ -141,6 +142,10 @@ export default function App() {
   // Upload readiness check state
   const [readinessOpenId, setReadinessOpenId] = useState<string | null>(null);
   const [readinessSummaryMessage, setReadinessSummaryMessage] = useState<string | null>(null);
+
+  // ARC 8 Upload History & Error Log states
+  const [historyFilter, setHistoryFilter] = useState<'All' | 'Uploaded' | 'Failed' | 'Scheduled'>('All');
+  const [historySearch, setHistorySearch] = useState('');
 
   // Quick form state for "Creating own custom mocked Video"
   const [isAddMockOpen, setIsAddMockOpen] = useState(false);
@@ -448,6 +453,26 @@ export default function App() {
       { ready: 0, warning: 0, blocked: 0 }
     );
   }, [readinessResults]);
+
+  // Computed history filtered & searched queue items (ARC 8)
+  const filteredHistory = useMemo(() => {
+    return queue.filter(item => {
+      // 1. Status Filter
+      if (historyFilter !== 'All' && item.status !== historyFilter) {
+        return false;
+      }
+      // 2. Search query
+      if (historySearch.trim() !== '') {
+        const query = historySearch.toLowerCase();
+        const matchesTitle = item.videoTitle?.toLowerCase().includes(query) || false;
+        const matchesYtTitle = item.youtubeTitle?.toLowerCase().includes(query) || false;
+        const matchesFile = item.fileName?.toLowerCase().includes(query) || false;
+        const matchesStatus = item.status?.toLowerCase().includes(query) || false;
+        return matchesTitle || matchesYtTitle || matchesFile || matchesStatus;
+      }
+      return true;
+    });
+  }, [queue, historyFilter, historySearch]);
 
   const getReadinessForItem = (itemId: string) => {
     return readinessResults.find(entry => entry.item.id === itemId)?.result;
@@ -1043,7 +1068,7 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-bold font-display tracking-tight text-white">AutoTube Lite</h1>
                 <span className="text-[10px] font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 px-1.5 py-0.5 rounded-md uppercase animate-pulse">
-                  ARC 7.2 Upload UX
+                  ARC 8 Upload History
                 </span>
               </div>
               <p className="text-xs text-slate-400">Google Drive + YouTube Shorts Scheduler</p>
@@ -1932,6 +1957,209 @@ export default function App() {
                           </div>
                         )}
 
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            {/* UPLOAD HISTORY & ERROR LOG SECTION (ARC 8) */}
+            <section className="bg-white/5 backdrop-blur-lg border border-white/10 p-5 rounded-3xl flex flex-col gap-4 shadow-xl">
+              <div className="flex items-center justify-between pb-2 border-b border-white/10 flex-wrap gap-2 bg-white/5 -mx-5 -mt-5 px-5 py-4">
+                <div className="flex items-center gap-2">
+                  <History className="w-4 h-4 text-rose-400" />
+                  <h2 className="font-semibold text-sm uppercase tracking-wider text-white">Upload History & Error Log</h2>
+                </div>
+                <span className="text-[10px] font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 px-1.5 py-0.5 rounded-md uppercase">
+                  ARC 8 Log
+                </span>
+              </div>
+
+              {/* Summary Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-center">
+                  <p className="text-base font-bold text-white font-mono">{queue.length}</p>
+                  <p className="text-[8px] uppercase font-bold text-slate-400 mt-0.5">Total Queue</p>
+                </div>
+                <div className="p-2.5 rounded-xl bg-emerald-500/5 border border-emerald-500/10 text-center">
+                  <p className="text-base font-bold text-emerald-400 font-mono">
+                    {queue.filter(q => q.status === 'Uploaded').length}
+                  </p>
+                  <p className="text-[8px] uppercase font-bold text-emerald-500/80 mt-0.5">Uploaded</p>
+                </div>
+                <div className="p-2.5 rounded-xl bg-red-500/5 border border-red-500/10 text-center">
+                  <p className="text-base font-bold text-red-400 font-mono">
+                    {queue.filter(q => q.status === 'Failed').length}
+                  </p>
+                  <p className="text-[8px] uppercase font-bold text-red-500/80 mt-0.5 font-sans">Failed</p>
+                </div>
+                <div className="p-2.5 rounded-xl bg-yellow-500/5 border border-yellow-500/10 text-center">
+                  <p className="text-base font-bold text-yellow-400 font-mono">
+                    {queue.filter(q => q.status === 'Scheduled').length}
+                  </p>
+                  <p className="text-[8px] uppercase font-bold text-yellow-500/80 mt-0.5 font-sans">Scheduled</p>
+                </div>
+              </div>
+
+              {/* Filters & Search Input */}
+              <div className="flex flex-col md:flex-row gap-2.5 justify-between items-stretch md:items-center mt-1">
+                {/* Filters */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {(['All', 'Uploaded', 'Failed', 'Scheduled'] as const).map(filterOpt => {
+                    const isSelected = historyFilter === filterOpt;
+                    return (
+                      <button
+                        key={`hist-filter-${filterOpt}`}
+                        type="button"
+                        onClick={() => setHistoryFilter(filterOpt)}
+                        className={`px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all cursor-pointer border ${
+                          isSelected
+                            ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 shadow-sm'
+                            : 'bg-white/5 text-slate-400 border-white/5 hover:text-white hover:bg-white/10'
+                        }`}
+                      >
+                        {filterOpt}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Search */}
+                <div className="relative flex-1 min-w-[150px]">
+                  <Search className="absolute left-2.5 top-2.5 w-3 h-3 text-slate-400" />
+                  <input
+                    type="text"
+                    value={historySearch}
+                    onChange={(e) => setHistorySearch(e.target.value)}
+                    placeholder="Search history..."
+                    className="w-full bg-black/25 border border-white/10 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-rose-500/40 focus:ring-1 focus:ring-rose-500/20"
+                  />
+                  {historySearch && (
+                    <button
+                      onClick={() => setHistorySearch('')}
+                      className="absolute right-2.5 top-2 text-slate-400 hover:text-white text-xs"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* History list or empty state */}
+              {queue.length === 0 ? (
+                <div className="text-center py-8 px-4 bg-black/10 border border-white/5 rounded-2xl flex flex-col items-center">
+                  <History className="w-6 h-6 text-slate-500 mb-2 stroke-[1.5]" />
+                  <p className="text-xs font-semibold text-slate-400">Upload history will appear after you add videos to the queue.</p>
+                </div>
+              ) : filteredHistory.length === 0 ? (
+                <div className="text-center py-8 px-4 bg-black/10 border border-white/5 rounded-2xl flex flex-col items-center">
+                  <Search className="w-6 h-6 text-slate-500 mb-2 stroke-[1.5]" />
+                  <p className="text-xs font-semibold text-slate-400">No items found for this filter.</p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3 max-h-[400px] overflow-y-auto pr-1">
+                  {filteredHistory.map(item => {
+                    const hasUrl = !!item.youtubeVideoUrl;
+                    const isUploaded = item.status === 'Uploaded';
+                    const isFailed = item.status === 'Failed';
+
+                    return (
+                      <div
+                        key={`history-card-${item.id}`}
+                        className={`p-3.5 rounded-2xl border transition-all duration-300 flex flex-col gap-2.5 ${
+                          isUploaded
+                            ? 'bg-emerald-500/[0.03] border-emerald-500/20'
+                            : isFailed
+                              ? 'bg-rose-500/[0.03] border-rose-500/20'
+                              : 'bg-white/5 border-white/10 hover:bg-white/[0.08]'
+                        }`}
+                      >
+                        {/* Upper line: Video Titles & Status Badging */}
+                        <div className="flex items-start justify-between gap-3 flex-wrap">
+                          <div className="min-w-0 flex-1">
+                            <h4 className="text-xs font-bold text-white leading-tight truncate" title={item.youtubeTitle}>
+                              {item.youtubeTitle || '(No Title)'}
+                            </h4>
+                            <p className="text-[10px] text-slate-400 mt-0.5 truncate">
+                              📁 Original: {item.fileName} {item.videoTitle ? `(${item.videoTitle})` : ''}
+                            </p>
+                          </div>
+
+                          <div className="shrink-0 flex items-center gap-1.5">
+                            {isUploaded ? (
+                              <span className="text-[8px] font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded uppercase flex items-center gap-1">
+                                <CheckCircle className="w-2.5 h-2.5 text-emerald-400" />
+                                Uploaded
+                              </span>
+                            ) : isFailed ? (
+                              <span className="text-[8px] font-mono font-bold bg-red-500/20 text-red-400 border border-red-500/20 px-2 py-0.5 rounded uppercase flex items-center gap-1">
+                                <AlertTriangle className="w-2.5 h-2.5 text-red-400" />
+                                Upload Failed
+                              </span>
+                            ) : (
+                              <span className="text-[8px] font-mono font-bold bg-yellow-500/20 text-yellow-500 border border-yellow-500/20 px-2 py-0.5 rounded uppercase flex items-center gap-1">
+                                <Clock className="w-2.5 h-2.5 text-yellow-500" />
+                                Scheduled
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Mid section: Dates, times, visibility & details */}
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[9px] font-mono text-slate-400 bg-black/20 p-2 rounded-xl border border-white/5">
+                          <div className="flex items-center gap-1">
+                            <Globe className="w-2.5 h-2.5 text-slate-500" />
+                            <span className="uppercase text-slate-300">{item.visibility}</span>
+                          </div>
+                          {(item.publishDate || item.publishTime) && (
+                            <div className="flex items-center gap-1">
+                              <Calendar className="w-2.5 h-2.5 text-slate-500" />
+                              <span className="text-slate-300 font-medium">Publish: {item.publishDate || '--'} {item.publishTime || '--'}</span>
+                            </div>
+                          )}
+                          {item.uploadedAt && (
+                            <div className="flex items-center gap-1">
+                              <CheckCircle className="w-2.5 h-2.5 text-emerald-500" />
+                              <span className="text-slate-300">Uploaded At: {new Date(item.uploadedAt).toLocaleString()}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Failed error details */}
+                        {isFailed && (
+                          <div className="bg-rose-950/20 border border-rose-900/30 rounded-xl p-2.5 text-[9px]">
+                            <p className="text-red-400 font-bold uppercase tracking-wider mb-1">Error Message</p>
+                            <p className="text-rose-200/90 leading-relaxed font-mono break-words">{item.uploadError || 'No error details recorded.'}</p>
+                            <p className="text-slate-400 mt-1.5 italic">
+                              💡 You can review the error before retry features are added.
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Actions line */}
+                        {isUploaded && hasUrl && (
+                          <div className="flex items-center gap-1.5 justify-end">
+                            <a
+                              href={item.youtubeVideoUrl!}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-2.5 py-1 text-[10px] font-bold text-emerald-300 hover:text-white bg-emerald-500/10 hover:bg-emerald-500/25 border border-emerald-500/20 rounded-lg transition flex items-center gap-1 cursor-pointer"
+                            >
+                              <Youtube className="w-3 h-3 text-emerald-400 shrink-0" />
+                              <span>View Video</span>
+                            </a>
+                            <button
+                              type="button"
+                              onClick={() => handleCopyLink(item.youtubeVideoUrl!)}
+                              className="px-2.5 py-1 text-[10px] font-bold text-sky-300 hover:text-white bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/20 rounded-lg transition flex items-center gap-1 cursor-pointer"
+                              title="Copy YouTube video link"
+                            >
+                              <Copy className="w-3 h-3 text-sky-400 shrink-0" />
+                              <span>Copy Link</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
                     );
                   })}

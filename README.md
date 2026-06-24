@@ -1,8 +1,17 @@
-# AutoTube Lite ARC 7.2 — Cleanup Labels & Metadata
+# AutoTube Lite ARC 8 — Upload History & Error Log
 
 AutoTube Lite is a lightweight YouTube Shorts upload and scheduling dashboard.
 
-ARC 7.2 cleans up leftover AI Studio/Gemini metadata and outdated ARC labels to ensure consistency. Single manual video upload remains fully active, while batch upload and automatic background scheduling are not active yet. No new environment variables or database tables have been added.
+ARC 8 introduces a clear upload history and error log view to track successful uploads, failed uploads, and scheduled items before implementing batch upload.
+
+## Key Changes in ARC 8
+
+- **Upload History Section**: Added a new section below the Upload Queue that organizes queue items with status filtering (All, Uploaded, Failed, Scheduled).
+- **Searchable Logging**: Users can search their upload history by video title, YouTube title, file name, or status.
+- **Improved Error Logging**: Failed items present highly readable diagnostic details from `upload_error` paired with explanatory helper text.
+- **Visual Badge Refinement**: Uploaded and Failed items now include beautiful, high-contrast visual badges and custom tracking cards.
+- **Summary Bento Cards**: Integrated small summary cards calculating Total Queue Items, Uploaded count, Failed count, and Scheduled count in real time from existing `upload_queue` data.
+- **No Scope Bloat**: No batch upload, automatic background scheduler, new environment variables, or database schema additions have been introduced.
 
 ## Key Changes in ARC 7.2
 
