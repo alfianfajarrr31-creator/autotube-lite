@@ -64,7 +64,8 @@ import {
   updateUploadQueueStatus,
   clearUploadQueue,
   markQueueItemUploaded,
-  markQueueItemUploadFailed
+  markQueueItemUploadFailed,
+  resetQueueItemForRetry
 } from './services/uploadQueueService';
 import {
   loadGoogleScripts,
@@ -861,17 +862,41 @@ export default function App() {
       return;
     }
 
+    const isRetry = item.status === 'Failed';
+
     // 2. Ask for manual upload confirmation
     const confirmUpload = window.confirm(
-      `Upload this video "${item.youtubeTitle}" to YouTube now? ARC 7 uploads manually and does not schedule yet.`
+      isRetry
+        ? `Retry uploading this failed video "${item.youtubeTitle}" to YouTube now?`
+        : `Upload this video "${item.youtubeTitle}" to YouTube now? ARC 9 uploads manually and does not schedule yet.`
     );
     if (!confirmUpload) {
       return;
     }
 
     setUploadingItemId(item.id);
-    setUploadingStep('Preparing upload...');
+    setUploadingStep(isRetry ? 'Retrying upload... (using existing queue item)' : 'Preparing upload...');
     setUploadingPercent(10);
+
+    if (isRetry) {
+      // Clear upload_error in Supabase & local state before retry
+      if (isSupabaseConfigured) {
+        try {
+          await resetQueueItemForRetry(item.id);
+        } catch (dbErr: any) {
+          console.error("Failed to reset retry status in database:", dbErr);
+        }
+      }
+      setQueue(prev => prev.map(q => {
+        if (q.id === item.id) {
+          return {
+            ...q,
+            uploadError: null
+          };
+        }
+        return q;
+      }));
+    }
 
     try {
       // 3. Find the associated video in bank to retrieve Google Drive file details
@@ -983,7 +1008,12 @@ export default function App() {
 
       setVideos(prev => prev.map(v => v.id === item.videoId ? { ...v, status: 'Uploaded' } : v));
 
-      showNotification(`Successfully uploaded to YouTube! Video URL: ${result.youtubeVideoUrl}`, 'success');
+      showNotification(
+        isRetry
+          ? "Retry upload complete."
+          : `Successfully uploaded to YouTube! Video URL: ${result.youtubeVideoUrl}`,
+        'success'
+      );
 
     } catch (error: any) {
       console.error("YouTube Upload process failed:", error);
@@ -1013,7 +1043,12 @@ export default function App() {
         return q;
       }));
 
-      showNotification(`Upload failed: ${errorMsg}`, 'error');
+      showNotification(
+        isRetry
+          ? `Retry upload failed: ${errorMsg}`
+          : `Upload failed: ${errorMsg}`,
+        'error'
+      );
     } finally {
       // Keep state visible for 5 seconds to let the user see progress outcomes
       setTimeout(() => {
@@ -1068,7 +1103,7 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-bold font-display tracking-tight text-white">AutoTube Lite</h1>
                 <span className="text-[10px] font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 px-1.5 py-0.5 rounded-md uppercase animate-pulse">
-                  ARC 8 Upload History
+                  ARC 9 Retry Upload
                 </span>
               </div>
               <p className="text-xs text-slate-400">Google Drive + YouTube Shorts Scheduler</p>
@@ -1823,13 +1858,16 @@ export default function App() {
                                 <div className="flex flex-col items-start md:items-end gap-1">
                                   <span className="text-[9px] px-2 py-0.5 bg-red-500/20 text-red-400 border border-red-500/20 rounded uppercase font-bold flex items-center gap-1">
                                     <AlertTriangle className="w-3 h-3" />
-                                    Failed
+                                    Upload Failed
                                   </span>
                                   {item.uploadError && (
                                     <span className="text-[8px] text-red-400 font-medium max-w-[130px] text-left md:text-right truncate" title={item.uploadError}>
                                       {item.uploadError}
                                     </span>
                                   )}
+                                  <span className="text-[7px] text-slate-400 italic">
+                                    Retry uses the existing queue item.
+                                  </span>
                                 </div>
                               ) : isProcessing ? (
                                 <div className="flex flex-col items-start md:items-end gap-1 w-24">
@@ -1848,7 +1886,7 @@ export default function App() {
                                 </span>
                               )}
                             </div>
-
+ 
                             {/* Action buttons */}
                             {!simulationActive && uploadingItemId !== item.id && (
                               <div className="flex items-center md:items-end gap-1.5 flex-wrap justify-end">
@@ -1880,11 +1918,17 @@ export default function App() {
                                     type="button"
                                     onClick={() => handleUploadToYouTube(item)}
                                     disabled={uploadingItemId !== null || readiness?.level === 'blocked'}
-                                    className="px-2 py-1 text-[10px] text-rose-300 hover:text-white bg-rose-500/10 hover:bg-rose-500/25 border border-rose-500/20 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition flex items-center gap-1 cursor-pointer"
-                                    title={readiness?.level === 'blocked' ? "Resolve blocked issues first" : "Upload to YouTube now"}
+                                    className="px-2 py-1 text-[10px] text-rose-300 hover:text-white bg-rose-500/10 hover:bg-rose-500/25 border border-rose-500/20 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition flex items-center gap-1 cursor-pointer font-semibold"
+                                    title={
+                                      readiness?.level === 'blocked'
+                                        ? "Resolve blocked issues first"
+                                        : item.status === 'Failed'
+                                          ? "Retry uses the existing queue item"
+                                          : "Upload to YouTube now"
+                                    }
                                   >
                                     <Youtube className="w-3 h-3 text-rose-400 shrink-0 animate-pulse" />
-                                    <span>Upload to YouTube</span>
+                                    <span>{item.status === 'Failed' ? 'Retry Upload' : 'Upload to YouTube'}</span>
                                   </button>
                                 )}
 
@@ -1964,7 +2008,7 @@ export default function App() {
               )}
             </section>
 
-            {/* UPLOAD HISTORY & ERROR LOG SECTION (ARC 8) */}
+            {/* UPLOAD HISTORY & ERROR LOG SECTION (ARC 9) */}
             <section className="bg-white/5 backdrop-blur-lg border border-white/10 p-5 rounded-3xl flex flex-col gap-4 shadow-xl">
               <div className="flex items-center justify-between pb-2 border-b border-white/10 flex-wrap gap-2 bg-white/5 -mx-5 -mt-5 px-5 py-4">
                 <div className="flex items-center gap-2">
@@ -1972,7 +2016,7 @@ export default function App() {
                   <h2 className="font-semibold text-sm uppercase tracking-wider text-white">Upload History & Error Log</h2>
                 </div>
                 <span className="text-[10px] font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 px-1.5 py-0.5 rounded-md uppercase">
-                  ARC 8 Log
+                  ARC 9 Log
                 </span>
               </div>
 
@@ -2132,7 +2176,7 @@ export default function App() {
                             <p className="text-red-400 font-bold uppercase tracking-wider mb-1">Error Message</p>
                             <p className="text-rose-200/90 leading-relaxed font-mono break-words">{item.uploadError || 'No error details recorded.'}</p>
                             <p className="text-slate-400 mt-1.5 italic">
-                              💡 You can review the error before retry features are added.
+                              💡 You can review the error and retry this upload. Retry uses the existing queue item.
                             </p>
                           </div>
                         )}
@@ -2157,6 +2201,21 @@ export default function App() {
                             >
                               <Copy className="w-3 h-3 text-sky-400 shrink-0" />
                               <span>Copy Link</span>
+                            </button>
+                          </div>
+                        )}
+
+                        {isFailed && (
+                          <div className="flex items-center gap-1.5 justify-end">
+                            <button
+                              type="button"
+                              onClick={() => handleUploadToYouTube(item)}
+                              disabled={uploadingItemId !== null}
+                              className="px-2.5 py-1 text-[10px] font-bold text-rose-300 hover:text-white bg-rose-500/10 hover:bg-rose-500/25 border border-rose-500/20 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition flex items-center gap-1 cursor-pointer"
+                              title="Retry uses the existing queue item."
+                            >
+                              <Youtube className="w-3 h-3 text-rose-400 shrink-0 animate-pulse" />
+                              <span>Retry Upload</span>
                             </button>
                           </div>
                         )}

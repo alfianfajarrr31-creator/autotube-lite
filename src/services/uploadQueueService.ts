@@ -143,6 +143,31 @@ export async function markQueueItemUploadFailed(
   return data as UploadQueueItem;
 }
 
+export async function resetQueueItemForRetry(
+  id: string
+): Promise<UploadQueueItem> {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error('Supabase is not configured.');
+  }
+
+  const { data, error } = await supabase
+    .from('upload_queue')
+    .update({
+      upload_error: null,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error resetting queue item for retry:', error);
+    throw new Error(`Failed to reset item for retry: ${error.message}`);
+  }
+
+  return data as UploadQueueItem;
+}
+
 export async function clearUploadQueue(): Promise<void> {
   if (!isSupabaseConfigured || !supabase) {
     throw new Error('Supabase is not configured.');

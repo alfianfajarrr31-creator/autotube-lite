@@ -1,8 +1,15 @@
-# AutoTube Lite ARC 8 — Upload History & Error Log
+# AutoTube Lite ARC 9 — Retry Failed Upload
 
 AutoTube Lite is a lightweight YouTube Shorts upload and scheduling dashboard.
 
-ARC 8 introduces a clear upload history and error log view to track successful uploads, failed uploads, and scheduled items before implementing batch upload.
+ARC 9 adds retry for failed uploads, allowing users to re-run single uploads without duplicating queue entries or metadata.
+
+## Key Changes in ARC 9
+
+- **Retry Failed Uploads**: Failed items in either the upload queue or upload history display a dedicated "Retry Upload" button that re-runs the manual upload flow directly.
+- **State Reuse**: The retry flow uses the existing queue item ID, Google Drive video mapping, and metadata presets. No duplicated database items or duplicate metadata records are created.
+- **Reset Failed State**: When retrying starts, `upload_error` is cleared from Supabase and local state instantly, and temporary step indicators denote the process ("Retrying upload...").
+- **No Scope Bloat**: No batch uploads, automatic background scheduler, new environment variables, or database schema additions have been introduced.
 
 ## Key Changes in ARC 8
 
@@ -62,7 +69,7 @@ VITE_GOOGLE_API_KEY=YOUR_GOOGLE_API_KEY
 VITE_GOOGLE_APP_ID=YOUR_GOOGLE_PROJECT_NUMBER
 ```
 
-No new environment variables are required for ARC 7.
+No new environment variables are required for ARC 9.
 
 ## Google Cloud Setup
 
@@ -101,7 +108,7 @@ add column if not exists upload_error text,
 add column if not exists uploaded_at timestamptz;
 ```
 
-ARC 7 does not require other new database tables.
+ARC 9 does not require other new database tables.
 
 ## Development
 
