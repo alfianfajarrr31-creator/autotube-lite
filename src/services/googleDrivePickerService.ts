@@ -3,9 +3,9 @@
  * requesting access token and opening the Google Drive Picker.
  */
 
-import { checkGoogleConfigured, waitForGlobal, loadGoogleScripts } from './googleScriptLoader';
+import { checkGoogleConfigured, waitForGlobal, loadGoogleScripts, loadGoogleClientLibraries, loadGooglePickerLibraries } from './googleScriptLoader';
 
-export { checkGoogleConfigured, loadGoogleScripts };
+export { checkGoogleConfigured, loadGoogleScripts, loadGoogleClientLibraries, loadGooglePickerLibraries };
 
 export interface GoogleDriveFileMetadata {
   driveFileId: string;
@@ -23,14 +23,11 @@ let pickerLoaded = false;
  * Ensures that the Google Picker extension is loaded using gapi.
  */
 export async function ensurePickerLoaded(): Promise<void> {
-  // Wait until gapi is fully present
-  const isGapiLoaded = () => typeof (window as any).gapi !== 'undefined';
-  if (!isGapiLoaded()) {
-    try {
-      await waitForGlobal(isGapiLoaded, 5000, "Google APIs (gapi) script is not available.");
-    } catch {
-      throw new Error("Google services could not be loaded. Please try hard refresh, disable ad-blocker for this site, or open in Chrome Incognito.");
-    }
+  // Wait until GAPI / GSI is fully present
+  try {
+    await loadGooglePickerLibraries();
+  } catch (err: any) {
+    throw new Error("Google login service could not be loaded. Please refresh the page. If this keeps happening, check Google Cloud origin settings and Vercel environment variables.");
   }
 
   return new Promise((resolve, reject) => {
@@ -40,7 +37,7 @@ export async function ensurePickerLoaded(): Promise<void> {
     }
     const gapi = (window as any).gapi;
     if (!gapi) {
-      reject(new Error("Google services could not be loaded. Please try hard refresh, disable ad-blocker for this site, or open in Chrome Incognito."));
+      reject(new Error("Google login service could not be loaded. Please refresh the page. If this keeps happening, check Google Cloud origin settings and Vercel environment variables."));
       return;
     }
     gapi.load('picker', {
@@ -49,7 +46,7 @@ export async function ensurePickerLoaded(): Promise<void> {
         resolve();
       },
       onerror: () => {
-        reject(new Error("Google services could not be loaded. Please try hard refresh, disable ad-blocker for this site, or open in Chrome Incognito."));
+        reject(new Error("Google login service could not be loaded. Please refresh the page. If this keeps happening, check Google Cloud origin settings and Vercel environment variables."));
       }
     });
   });
@@ -58,11 +55,17 @@ export async function ensurePickerLoaded(): Promise<void> {
 /**
  * Requests an OAuth 2.0 Access Token using Google Identity Services (GIS).
  */
-export function requestDriveAccessToken(): Promise<string> {
+export async function requestDriveAccessToken(): Promise<string> {
+  try {
+    await loadGooglePickerLibraries();
+  } catch (err: any) {
+    throw new Error("Google login service could not be loaded. Please refresh the page. If this keeps happening, check Google Cloud origin settings and Vercel environment variables.");
+  }
+
   return new Promise((resolve, reject) => {
     const google = (window as any).google;
     if (!google?.accounts?.oauth2) {
-      reject(new Error("Google services could not be loaded. Please try hard refresh, disable ad-blocker for this site, or open in Chrome Incognito."));
+      reject(new Error("Google login service could not be loaded. Please refresh the page. If this keeps happening, check Google Cloud origin settings and Vercel environment variables."));
       return;
     }
 

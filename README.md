@@ -100,3 +100,12 @@ npm run lint
 ## Deployment Notes
 
 Deploy with the same environment variables listed above.
+
+## Google Auth Troubleshooting
+
+If Google authentication or library loading fails in production, follow these verification steps:
+- **Environment Variables**: Confirm `VITE_GOOGLE_CLIENT_ID` exists in your Vercel/Production dashboard and matches your active Google Cloud Project credentials exactly.
+- **Client ID Type**: Confirm that your OAuth 2.0 Client ID type is set to **Web Application** in the Google Cloud Console.
+- **Authorized JavaScript Origins**: Confirm that your **Authorized JavaScript origins** configuration includes the correct production domain (e.g. `https://your-app.vercel.app`) **without** any trailing slash.
+- **API Key Restrictions**: If your Google API Key has HTTP referrer website restrictions, confirm they include the production domain with `/*` suffix (e.g. `https://your-app.vercel.app/*`).
+- **Redeployment**: Always trigger a new deployment or redeploy after editing environment variables to ensure they are properly injected.

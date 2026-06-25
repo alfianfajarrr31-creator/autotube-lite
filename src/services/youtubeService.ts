@@ -2,6 +2,8 @@
  * Service for Google OAuth YouTube connection and fetching channel details using YouTube Data API v3.
  */
 
+import { loadGoogleAuthOnly } from './googleScriptLoader';
+
 export interface YouTubeChannelInfo {
   id: string;
   title: string;
@@ -16,11 +18,18 @@ export interface YouTubeChannelInfo {
 /**
  * Requests an OAuth 2.0 Access Token for YouTube Readonly scope using Google Identity Services (GIS).
  */
-export function connectYouTube(): Promise<string> {
+export async function connectYouTube(): Promise<string> {
+  // Ensure Google scripts are loaded using the shared loader
+  try {
+    await loadGoogleAuthOnly();
+  } catch (err: any) {
+    throw new Error("Google login service could not be loaded. Please refresh the page. If this keeps happening, check Google Cloud origin settings and Vercel environment variables.");
+  }
+
   return new Promise((resolve, reject) => {
     const google = (window as any).google;
     if (!google?.accounts?.oauth2) {
-      reject(new Error("Google Identity Services could not be loaded. Please ensure you have configured environment variables, disable ad-blockers, or try using an incognito window."));
+      reject(new Error("Google login service could not be loaded. Please refresh the page. If this keeps happening, check Google Cloud origin settings and Vercel environment variables."));
       return;
     }
 

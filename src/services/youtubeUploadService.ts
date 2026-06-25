@@ -1,4 +1,4 @@
-import { checkGoogleConfigured } from './googleScriptLoader';
+import { checkGoogleConfigured, loadGoogleAuthOnly } from './googleScriptLoader';
 
 export interface YouTubeUploadInput {
   accessToken: string;
@@ -19,11 +19,18 @@ export interface YouTubeUploadResult {
 /**
  * Requests an OAuth 2.0 Access Token with YouTube Upload scope.
  */
-export function requestYouTubeUploadToken(): Promise<string> {
+export async function requestYouTubeUploadToken(): Promise<string> {
+  // Ensure Google scripts are loaded using the shared loader
+  try {
+    await loadGoogleAuthOnly();
+  } catch (err: any) {
+    throw new Error("Google login service could not be loaded. Please refresh the page. If this keeps happening, check Google Cloud origin settings and Vercel environment variables.");
+  }
+
   return new Promise((resolve, reject) => {
     const google = (window as any).google;
     if (!google?.accounts?.oauth2) {
-      reject(new Error("Google Identity Services could not be loaded. Please ensure you have configured environment variables, disable ad-blockers, or try using an incognito window."));
+      reject(new Error("Google login service could not be loaded. Please refresh the page. If this keeps happening, check Google Cloud origin settings and Vercel environment variables."));
       return;
     }
 

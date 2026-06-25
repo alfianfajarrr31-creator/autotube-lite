@@ -74,7 +74,8 @@ import {
   ensurePickerLoaded,
   requestDriveAccessToken,
   openGooglePicker,
-  checkGoogleConfigured
+  checkGoogleConfigured,
+  loadGoogleClientLibraries
 } from './services/googleDrivePickerService';
 import {
   connectYouTube,
@@ -243,6 +244,23 @@ export default function App() {
     }
     return null;
   });
+
+  // Google Auth debug states
+  const [googleAuthDebugStatus, setGoogleAuthDebugStatus] = useState<string | null>(null);
+  const [checkingGoogleAuth, setCheckingGoogleAuth] = useState(false);
+
+  const handleCheckGoogleAuth = async () => {
+    setCheckingGoogleAuth(true);
+    setGoogleAuthDebugStatus(null);
+    try {
+      await loadGoogleClientLibraries();
+      setGoogleAuthDebugStatus("Google Auth Ready");
+    } catch (err: any) {
+      setGoogleAuthDebugStatus(err?.message || "Google login service could not be loaded.");
+    } finally {
+      setCheckingGoogleAuth(false);
+    }
+  };
 
   const handleConnectYouTube = async () => {
     try {
@@ -2044,6 +2062,28 @@ export default function App() {
                   <span className="text-[10px] text-amber-200/80 leading-normal">
                     <strong>Note:</strong> V1 Complete supports manual batch upload for up to 3 videos at a time. Uploads run one by one. Automatic scheduling is not active yet.
                   </span>
+                </div>
+
+                {/* Check Google Auth Debug Area */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 p-2.5 bg-white/[0.02] border border-white/5 rounded-xl text-left">
+                  <div className="flex flex-col">
+                    <span className="text-[10px] text-slate-300 font-medium">Google Auth Diagnostic</span>
+                    {googleAuthDebugStatus ? (
+                      <span className={`text-[9px] font-mono mt-0.5 ${googleAuthDebugStatus === 'Google Auth Ready' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {googleAuthDebugStatus}
+                      </span>
+                    ) : (
+                      <span className="text-[9px] font-mono text-slate-500 mt-0.5">Not run yet</span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCheckGoogleAuth}
+                    disabled={checkingGoogleAuth}
+                    className="px-2 py-1 text-[10px] font-medium text-slate-300 bg-white/5 hover:bg-white/10 active:bg-white/15 border border-white/10 rounded-md transition cursor-pointer disabled:opacity-50"
+                  >
+                    {checkingGoogleAuth ? "Checking..." : "Check Google Auth"}
+                  </button>
                 </div>
               </div>
 
