@@ -171,6 +171,18 @@ export default function App() {
     localStorage.setItem('weeklyShortsTarget', String(weeklyShortsTarget));
   }, [weeklyShortsTarget]);
 
+  // ARC 13 Daily Workflow states
+  const [activeTabMode, setActiveTabMode] = useState<'dashboard' | 'workflow'>(() => {
+    const saved = localStorage.getItem('activeTabMode');
+    return (saved === 'workflow' || saved === 'dashboard') ? saved : 'dashboard';
+  });
+
+  const [showAddedMessage, setShowAddedMessage] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem('activeTabMode', activeTabMode);
+  }, [activeTabMode]);
+
   // ARC 12 Queue Management states
   const [queueFilter, setQueueFilter] = useState<'All' | 'Scheduled' | 'Uploaded' | 'Failed' | 'Missing Schedule' | 'Ready' | 'Needs Review' | 'Blocked'>('All');
   const [queueSort, setQueueSort] = useState<'Newest First' | 'Oldest First' | 'Publish Date Asc' | 'Publish Date Desc' | 'Status'>('Publish Date Asc');
@@ -375,6 +387,7 @@ export default function App() {
 
   const handleSelectVideo = (video: Video) => {
     setSelectedVideoId(video.id);
+    setShowAddedMessage(false);
     setYtTitle(video.title + (video.title.includes('#shorts') ? '' : ' 🔥'));
     setYtDescription(`Exploring the details for: ${video.title}. Created in demo only workspace.`);
     setYtThumbnailText('');
@@ -829,8 +842,8 @@ export default function App() {
     showNotification(`Added "${newVideo.title}" to your Video Bank!`);
   };
 
-  const handleQueueSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleQueueSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!selectedVideoObj) {
       showNotification('Choose a video from the Video Bank first!', 'error');
       return;
@@ -882,6 +895,13 @@ export default function App() {
         setQueue(prev => [...prev, newQueueItem]);
         setVideos(prev => prev.map(v => v.id === selectedVideoObj.id ? { ...v, status: 'Scheduled' } : v));
         showNotification(`Successfully scheduled in Supabase: "${ytTitle}"`);
+        
+        // Clear metadata fields on success
+        setYtTitle('');
+        setYtDescription('');
+        setYtHashtags('');
+        setYtThumbnailText('');
+        setShowAddedMessage(true);
       } catch (err: any) {
         showNotification(`Database error: ${err.message}`, 'error');
       }
@@ -890,6 +910,13 @@ export default function App() {
       // Update matching video in bank status to Scheduled
       setVideos(prev => prev.map(v => v.id === selectedVideoObj.id ? { ...v, status: 'Scheduled' } : v));
       showNotification(`Successfully scheduled: "${ytTitle}"`);
+      
+      // Clear metadata fields on success
+      setYtTitle('');
+      setYtDescription('');
+      setYtHashtags('');
+      setYtThumbnailText('');
+      setShowAddedMessage(true);
     }
   };
 
@@ -1175,7 +1202,7 @@ export default function App() {
   const handleStartBatchUpload = async () => {
     if (selectedQueueIds.length === 0) return;
     if (selectedQueueIds.length > 3) {
-      showNotification("ARC 10 allows up to 3 videos per batch for safety.", "error");
+      showNotification("V1 Complete allows up to 3 videos per batch for safety.", "error");
       return;
     }
     if (!selectedYtChannel) {
@@ -1184,7 +1211,7 @@ export default function App() {
     }
 
     const confirmBatch = window.confirm(
-      `Upload ${selectedQueueIds.length} selected video(s) to YouTube now? ARC 10 uploads manually and does not schedule yet.`
+      `Upload ${selectedQueueIds.length} selected video(s) to YouTube now? V1 Complete uploads manually and does not schedule yet.`
     );
     if (!confirmBatch) return;
 
@@ -1382,7 +1409,7 @@ export default function App() {
     const confirmUpload = window.confirm(
       isRetry
         ? `Retry uploading this failed video "${item.youtubeTitle}" to YouTube now?`
-        : `Upload this video "${item.youtubeTitle}" to YouTube now? ARC 10 uploads manually and does not schedule yet.`
+        : `Upload this video "${item.youtubeTitle}" to YouTube now? V1 Complete uploads manually and does not schedule yet.`
     );
     if (!confirmUpload) {
       return;
@@ -1466,7 +1493,7 @@ export default function App() {
 
       // Add a warning if there is a schedule saved
       if (item.publishDate || item.publishTime) {
-        showNotification("Schedule date/time is saved but ARC 7 uploads manually now.", "info");
+        showNotification("Schedule date/time is saved but V1 Complete uploads manually now.", "info");
       }
 
       const result = await uploadVideoToYouTube({
@@ -1599,6 +1626,39 @@ export default function App() {
     return videos.filter(v => v.title.toLowerCase().includes(vBankSearch.toLowerCase()) || v.fileName.toLowerCase().includes(vBankSearch.toLowerCase()));
   }, [videos, vBankSearch]);
 
+  // Daily Workflow Stats Memo blocks
+  const driveVideosCount = useMemo(() => {
+    return videos.filter(v => v.source === 'drive').length;
+  }, [videos]);
+
+  const todayPlannedCount = useMemo(() => {
+    return queue.filter(q => q.publishDate === todayStr).length;
+  }, [queue, todayStr]);
+
+  const readyTodayCount = useMemo(() => {
+    return queue.filter(q => {
+      if (q.publishDate !== todayStr) return false;
+      const readiness = getReadinessForItem(q.id);
+      return readiness?.level === 'ready';
+    }).length;
+  }, [queue, todayStr, readinessResults]);
+
+  const uploadedTodayCount = useMemo(() => {
+    return queue.filter(q => q.status === 'Uploaded' && q.publishDate === todayStr).length;
+  }, [queue, todayStr]);
+
+  const handleToggleSelect = (itemId: string) => {
+    if (selectedQueueIds.includes(itemId)) {
+      setSelectedQueueIds(prev => prev.filter(id => id !== itemId));
+    } else {
+      if (selectedQueueIds.length >= 3) {
+        showNotification('You can select a maximum of 3 items for batch upload!', 'error');
+        return;
+      }
+      setSelectedQueueIds(prev => [...prev, itemId]);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#0F1115] text-slate-200 flex flex-col font-sans selection:bg-rose-500 selection:text-white relative overflow-hidden">
       
@@ -1614,10 +1674,13 @@ export default function App() {
               <Youtube className="w-5 h-5 text-white" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-xl font-bold font-display tracking-tight text-white">AutoTube Lite</h1>
                 <span className="text-[10px] font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 px-1.5 py-0.5 rounded-md uppercase animate-pulse">
-                  ARC 12 Queue Polish
+                  V1 Complete
+                </span>
+                <span className="text-[10px] font-sans font-medium text-slate-300 bg-white/5 border border-white/10 px-1.5 py-0.5 rounded-md">
+                  Manual upload workflow ready
                 </span>
               </div>
               <p className="text-xs text-slate-400">Google Drive + YouTube Shorts Scheduler</p>
@@ -1706,9 +1769,49 @@ export default function App() {
 
       {/* CORE WRAPPER */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-8 flex flex-col gap-6">
-        
-        {/* STATS DECK */}
-        <section className="grid grid-cols-2 lg:grid-cols-4 gap-4" id="stats-dashboard">
+
+        {/* VIEW MODE SELECTION TABS */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white/[0.02] border border-white/10 p-3.5 rounded-3xl backdrop-blur-md">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-rose-500/10 rounded-2xl text-rose-400">
+              <Zap className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-white tracking-wide">Workspace View Mode</h2>
+              <p className="text-xs text-slate-400">Select a workflow mode below to optimize your daily task execution.</p>
+            </div>
+          </div>
+
+          <div className="flex items-center bg-black/40 p-1 rounded-2xl border border-white/5 w-full sm:w-auto">
+            <button
+              onClick={() => setActiveTabMode('dashboard')}
+              className={`flex-1 sm:flex-initial px-5 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
+                activeTabMode === 'dashboard'
+                  ? 'bg-rose-500 text-white shadow-lg'
+                  : 'text-slate-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>Full Dashboard</span>
+            </button>
+            <button
+              onClick={() => setActiveTabMode('workflow')}
+              className={`flex-1 sm:flex-initial px-5 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
+                activeTabMode === 'workflow'
+                  ? 'bg-rose-500 text-white shadow-lg'
+                  : 'text-slate-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Zap className="w-3.5 h-3.5" />
+              <span>Daily Workflow</span>
+            </button>
+          </div>
+        </div>
+
+        {activeTabMode === 'dashboard' ? (
+          <>
+            {/* STATS DECK */}
+            <section className="grid grid-cols-2 lg:grid-cols-4 gap-4" id="stats-dashboard">
           <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-4 rounded-2xl relative overflow-hidden transition duration-300 hover:border-white/20 hover:bg-white/[0.08]">
             <div className="absolute top-0 right-0 w-16 h-16 bg-blue-500/10 rounded-bl-full pointer-events-none"></div>
             <div className="flex justify-between items-start">
@@ -1939,7 +2042,7 @@ export default function App() {
                 <div className="flex items-start gap-2.5 p-2.5 bg-amber-500/5 border border-amber-500/10 rounded-xl text-left">
                   <Info className="w-4 h-4 text-amber-500/85 shrink-0 mt-0.5" />
                   <span className="text-[10px] text-amber-200/80 leading-normal">
-                    <strong>Note:</strong> ARC 10 supports manual batch upload for up to 3 videos at a time. Uploads run one by one. Automatic scheduling is not active yet.
+                    <strong>Note:</strong> V1 Complete supports manual batch upload for up to 3 videos at a time. Uploads run one by one. Automatic scheduling is not active yet.
                   </span>
                 </div>
               </div>
@@ -2199,7 +2302,7 @@ export default function App() {
                   <div className="col-span-3 flex items-start gap-2.5 p-2.5 bg-sky-500/5 border border-sky-500/10 rounded-xl text-left">
                     <Info className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
                     <span className="text-[10px] text-sky-100/80 leading-normal font-medium">
-                      ARC 10 supports manual batch upload for up to 3 videos at a time. Uploads run one by one. Automatic scheduling is not active yet.
+                      V1 Complete supports manual batch upload for up to 3 videos at a time. Uploads run one by one. Automatic scheduling is not active yet.
                       {readinessSummaryMessage ? ` Latest check: ${readinessSummaryMessage}` : ''}
                     </span>
                   </div>
@@ -2345,7 +2448,7 @@ export default function App() {
                   {selectedQueueIds.length > 3 && (
                     <p className="text-[10px] text-rose-400 font-medium flex items-center gap-1 bg-rose-500/10 p-2 rounded-lg border border-rose-500/20">
                       <AlertTriangle className="w-3.5 h-3.5" />
-                      <span>ARC 10 allows up to 3 videos per batch for safety. Please deselect some items.</span>
+                      <span>V1 Complete allows up to 3 videos per batch for safety. Please deselect some items.</span>
                     </p>
                   )}
                 </div>
@@ -2950,7 +3053,7 @@ export default function App() {
                   <h2 className="font-semibold text-sm uppercase tracking-wider text-white">Upload History & Error Log</h2>
                 </div>
                 <span className="text-[10px] font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 px-1.5 py-0.5 rounded-md uppercase">
-                  ARC 10 Log
+                  V1 Log
                 </span>
               </div>
 
@@ -3273,7 +3376,7 @@ export default function App() {
                         Metadata Preset
                       </h3>
                       <span className="text-[9px] text-purple-400 bg-purple-500/10 border border-purple-500/20 px-1.5 py-0.5 rounded uppercase font-bold tracking-wide">
-                        ARC 4
+                        V1 Preset
                       </span>
                     </div>
 
@@ -3571,7 +3674,7 @@ export default function App() {
                 <div className="flex items-center gap-2">
                   <h2 className="font-bold text-lg text-white font-display tracking-tight">Schedule Planning</h2>
                   <span className="text-[10px] font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 px-1.5 py-0.5 rounded-md uppercase">
-                    ARC 11 Plan
+                    V1 Plan
                   </span>
                 </div>
                 <p className="text-xs text-slate-400 mt-0.5">Organize, review, and analyze planned YouTube Shorts uploads before publishing.</p>
@@ -3888,13 +3991,556 @@ export default function App() {
                 Upload Simulation Only
               </h3>
               <p>
-                Clicking the <strong>Demo Upload Simulation</strong> button triggers a simulated upload progress loop. This is a local frontend-only demo and does not connect to actual YouTube servers yet.
+                Demo Upload Simulation is separate from real upload. Real YouTube upload is available through Upload to YouTube or Manual Batch Upload.
               </p>
             </div>
           </div>
         </section>
+      </>
+    ) : (
+      <div className="flex flex-col gap-6 animate-fadeIn">
+        {/* DAILY HELPER CARD */}
+        <div className="bg-gradient-to-r from-rose-500/10 via-purple-500/10 to-blue-500/10 border border-white/10 p-4 rounded-2xl flex items-center gap-3">
+          <Info className="w-5 h-5 text-rose-400 shrink-0" />
+          <p className="text-xs text-slate-300 font-medium font-sans">
+            Daily Workflow is for fast preparation and manual upload. Use Full Dashboard for advanced queue management.
+          </p>
+        </div>
 
-      </main>
+        {/* DAILY STATS DECK */}
+        <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Drive Videos */}
+          <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-4 rounded-2xl relative overflow-hidden transition duration-300 hover:border-white/20 hover:bg-white/[0.08]">
+            <div className="absolute top-0 right-0 w-16 h-16 bg-blue-500/10 rounded-bl-full pointer-events-none"></div>
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Drive Videos</p>
+                <p className="text-2xl font-bold text-white mt-1 font-mono">{driveVideosCount}</p>
+              </div>
+              <div className="p-2 bg-white/10 rounded-xl text-slate-300 border border-white/5">
+                <Film className="w-4 h-4" />
+              </div>
+            </div>
+            <p className="text-[9px] text-slate-400 mt-2">In Google Drive Bank</p>
+          </div>
+
+          {/* Today Planned */}
+          <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-4 rounded-2xl relative overflow-hidden transition duration-300 hover:border-white/20 hover:bg-white/[0.08]">
+            <div className="absolute top-0 right-0 w-16 h-16 bg-amber-500/10 rounded-bl-full pointer-events-none"></div>
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Today Planned</p>
+                <p className="text-2xl font-bold text-amber-400 mt-1 font-mono">{todayPlannedCount}</p>
+              </div>
+              <div className="p-2 bg-white/10 rounded-xl text-amber-400 border border-white/5">
+                <Calendar className="w-4 h-4" />
+              </div>
+            </div>
+            <p className="text-[9px] text-slate-400 mt-2">Planned for today</p>
+          </div>
+
+          {/* Ready Today */}
+          <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-4 rounded-2xl relative overflow-hidden transition duration-300 hover:border-white/20 hover:bg-white/[0.08]">
+            <div className="absolute top-0 right-0 w-16 h-16 bg-emerald-500/10 rounded-bl-full pointer-events-none"></div>
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Ready Today</p>
+                <p className="text-2xl font-bold text-emerald-400 mt-1 font-mono">{readyTodayCount}</p>
+              </div>
+              <div className="p-2 bg-white/10 rounded-xl text-emerald-400 border border-white/5">
+                <CheckCircle2 className="w-4 h-4" />
+              </div>
+            </div>
+            <p className="text-[9px] text-slate-400 mt-2">Passed check audits</p>
+          </div>
+
+          {/* Uploaded Today */}
+          <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-4 rounded-2xl relative overflow-hidden transition duration-300 hover:border-white/20 hover:bg-white/[0.08]">
+            <div className="absolute top-0 right-0 w-16 h-16 bg-rose-500/10 rounded-bl-full pointer-events-none"></div>
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Uploaded Today</p>
+                <p className="text-2xl font-bold text-rose-400 mt-1 font-mono">{uploadedTodayCount}</p>
+              </div>
+              <div className="p-2 bg-white/10 rounded-xl text-rose-400 border border-white/5">
+                <Upload className="w-4 h-4" />
+              </div>
+            </div>
+            <p className="text-[9px] text-slate-400 mt-2">Uploaded today</p>
+          </div>
+        </section>
+
+        {/* STEP 1 — PICK VIDEO */}
+        <section className="bg-white/5 backdrop-blur-lg border border-white/10 p-5 rounded-3xl flex flex-col gap-4 shadow-xl">
+          <div className="flex items-center justify-between pb-2 border-b border-white/10 flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-rose-500 text-white flex items-center justify-center text-xs font-bold font-mono">1</span>
+              <h3 className="font-bold text-sm uppercase tracking-wider text-white">Pick Video</h3>
+            </div>
+            <button
+              type="button"
+              onClick={handlePickFromGoogleDrive}
+              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Pick from Google Drive</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+            {videos.filter(v => v.source === 'drive').length === 0 ? (
+              <div className="col-span-full text-center py-6 px-4 bg-black/20 border border-white/5 rounded-xl">
+                <VideoOff className="w-7 h-7 text-slate-600 mx-auto mb-1.5" />
+                <p className="text-xs text-slate-400 font-medium">No Google Drive videos in bank yet.</p>
+                <p className="text-[10px] text-slate-500 mt-1">Click the button above to import files from your Google Drive.</p>
+              </div>
+            ) : (
+              videos.filter(v => v.source === 'drive').map((video) => {
+                const isSelected = selectedVideoId === video.id;
+                const inQueue = queue.some(q => q.videoId === video.id);
+                return (
+                  <div
+                    key={`wf-pick-${video.id}`}
+                    onClick={() => handleSelectVideo(video)}
+                    className={`p-3 rounded-xl border text-left cursor-pointer transition-all duration-200 flex flex-col justify-between gap-2.5 relative ${
+                      isSelected
+                        ? 'bg-white/10 shadow-md border-rose-500/50 ring-1 ring-rose-500/30'
+                        : 'bg-white/5 border-white/5 hover:border-white/10 hover:bg-white/[0.08]'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-xs font-semibold text-white line-clamp-1 truncate block text-left flex-1 font-sans" title={video.title}>
+                        {video.title}
+                      </span>
+                      <span className="text-[9px] bg-white/10 text-slate-300 font-mono px-1.5 py-0.2 rounded shrink-0">
+                        {video.duration}
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-mono text-slate-400 block truncate" title={video.fileName}>
+                      📁 {video.fileName}
+                    </span>
+                    <div className="flex items-center justify-between gap-1.5 pt-1.5 border-t border-white/5 mt-1">
+                      <span className="text-[9px] text-slate-400 font-mono">
+                        {video.size} • {video.resolution}
+                      </span>
+                      {video.status === 'Uploaded' ? (
+                        <span className="text-[8px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 font-bold px-1.5 py-0.2 rounded font-sans">
+                          Published
+                        </span>
+                      ) : inQueue ? (
+                        <span className="text-[8px] bg-blue-500/20 text-blue-400 border border-blue-500/20 font-bold px-1.5 py-0.2 rounded font-sans">
+                          Scheduled
+                        </span>
+                      ) : (
+                        <span className="text-[8px] bg-white/10 text-slate-300 border border-white/10 font-bold px-1.5 py-0.2 rounded font-sans">
+                          Draft
+                        </span>
+                      )}
+                    </div>
+                    {isSelected && (
+                      <div className="absolute top-1 right-1 w-2 h-2 bg-rose-500 rounded-full"></div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </section>
+
+        {/* STEP 2 — PREPARE METADATA */}
+        <section className="bg-white/5 backdrop-blur-lg border border-white/10 p-5 rounded-3xl flex flex-col gap-4 shadow-xl">
+          <div className="flex items-center justify-between pb-2 border-b border-white/10 flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-rose-500 text-white flex items-center justify-center text-xs font-bold font-mono">2</span>
+              <h3 className="font-bold text-sm uppercase tracking-wider text-white">Prepare Metadata</h3>
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                type="button"
+                onClick={handleApplyPreset}
+                disabled={!selectedVideoObj}
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold flex items-center gap-1 transition-all cursor-pointer shadow-sm"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Apply Preset</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setYtTitle('');
+                  setYtDescription('');
+                  setYtHashtags('');
+                  setYtThumbnailText('');
+                  showNotification('Metadata fields cleared.', 'info');
+                }}
+                className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-slate-300 rounded-xl text-xs font-bold flex items-center gap-1 transition-all cursor-pointer border border-white/5"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-slate-400" />
+                <span>Clear Metadata</span>
+              </button>
+            </div>
+          </div>
+
+          {!selectedVideoObj ? (
+            <div className="text-center py-8 bg-black/20 border border-white/5 rounded-xl">
+              <AlertTriangle className="w-7 h-7 text-amber-500 mx-auto mb-1.5" />
+              <p className="text-xs text-slate-400 font-medium">Please select a video from Step 1 first.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+              <div className="lg:col-span-8 flex flex-col gap-3.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div className="flex flex-col">
+                    <label className="text-[10px] uppercase font-bold text-slate-400 mb-1 tracking-wider">Metadata Preset</label>
+                    <select
+                      value={selectedPresetIndex}
+                      onChange={(e) => handlePresetChange(Number(e.target.value))}
+                      className="bg-black/40 border border-white/15 focus:border-rose-500/50 rounded-xl px-3 py-2 text-xs text-white outline-none transition cursor-pointer"
+                    >
+                      {METADATA_PRESETS.map((preset, idx) => (
+                        <option key={`wf-preset-${idx}`} value={idx} className="bg-[#15181e] text-white">
+                          {preset.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col">
+                    <label className="text-[10px] uppercase font-bold text-slate-400 mb-1 tracking-wider">Thumbnail Text Select</label>
+                    <select
+                      value={selectedThumbnailText}
+                      onChange={(e) => setSelectedThumbnailText(e.target.value)}
+                      className="bg-black/40 border border-white/15 focus:border-rose-500/50 rounded-xl px-3 py-2 text-xs text-white outline-none transition cursor-pointer"
+                    >
+                      {METADATA_PRESETS[selectedPresetIndex]?.thumbnailTextOptions.map((opt, idx) => (
+                        <option key={`wf-opt-${idx}`} value={opt} className="bg-[#15181e] text-white">
+                          {opt}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="sm:col-span-2 flex flex-col">
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">YouTube Title</label>
+                      <span className={`text-[10px] font-mono font-bold ${ytTitle.length > 100 ? 'text-rose-400' : 'text-slate-500'}`}>
+                        {ytTitle.length}/100
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      value={ytTitle}
+                      onChange={(e) => setYtTitle(e.target.value.slice(0, 100))}
+                      className="bg-black/40 border border-white/15 focus:border-rose-500/50 rounded-xl px-3 py-2.5 text-xs text-white outline-none transition"
+                      placeholder="Type an exciting title with a hook..."
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2 flex flex-col">
+                    <label className="text-[10px] uppercase font-bold text-slate-400 mb-1 tracking-wider">Description</label>
+                    <textarea
+                      value={ytDescription}
+                      onChange={(e) => setYtDescription(e.target.value)}
+                      className="bg-black/40 border border-white/15 focus:border-rose-500/50 rounded-xl px-3 py-2 text-xs text-white outline-none transition h-20 resize-none leading-relaxed"
+                      placeholder="Short video description detail..."
+                    />
+                  </div>
+
+                  <div className="flex flex-col">
+                    <label className="text-[10px] uppercase font-bold text-slate-400 mb-1 tracking-wider">Hashtags</label>
+                    <input
+                      type="text"
+                      value={ytHashtags}
+                      onChange={(e) => setYtHashtags(e.target.value)}
+                      className="bg-black/40 border border-white/15 focus:border-rose-500/50 rounded-xl px-3 py-2 text-xs text-white outline-none transition"
+                      placeholder="#shorts #foryou"
+                    />
+                  </div>
+
+                  <div className="flex flex-col">
+                    <label className="text-[10px] uppercase font-bold text-slate-400 mb-1 tracking-wider">Thumbnail Text Override</label>
+                    <input
+                      type="text"
+                      value={ytThumbnailText}
+                      onChange={(e) => setYtThumbnailText(e.target.value)}
+                      className="bg-black/40 border border-white/15 focus:border-rose-500/50 rounded-xl px-3 py-2 text-xs text-white outline-none transition"
+                      placeholder="Type custom overlay text..."
+                    />
+                  </div>
+
+                  <div className="flex flex-col">
+                    <label className="text-[10px] uppercase font-bold text-slate-400 mb-1 tracking-wider">Visibility</label>
+                    <select
+                      value={ytVisibility}
+                      onChange={(e) => setYtVisibility(e.target.value as any)}
+                      className="bg-black/40 border border-white/15 focus:border-rose-500/50 rounded-xl px-3 py-2 text-xs text-white outline-none transition cursor-pointer"
+                    >
+                      <option value="Public" className="bg-[#15181e] text-white">Public</option>
+                      <option value="Unlisted" className="bg-[#15181e] text-white">Unlisted</option>
+                      <option value="Private" className="bg-[#15181e] text-white">Private</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="lg:col-span-4 flex flex-col items-center justify-center bg-black/20 border border-white/5 p-4 rounded-2xl relative overflow-hidden">
+                <span className="text-[9px] uppercase font-bold tracking-wider text-slate-400 mb-3 block">Visual Mockup</span>
+                <div className={`w-[130px] h-[200px] rounded-xl flex flex-col justify-between p-3 relative overflow-hidden shadow-xl border border-white/10 ${ytCoverGradient}`}>
+                  <div className="flex items-center justify-between z-10">
+                    <Youtube className="w-3.5 h-3.5 text-white" />
+                    <span className="text-[7px] bg-red-600 text-white font-bold px-1 rounded uppercase tracking-wider font-mono">Shorts</span>
+                  </div>
+
+                  <div className="my-auto text-center z-10 px-1">
+                    <span className="text-white text-[10px] font-black tracking-tight leading-tight uppercase font-display select-none block drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)] break-words">
+                      {ytThumbnailText || selectedThumbnailText || "No Overlay"}
+                    </span>
+                  </div>
+
+                  <div className="flex items-end justify-between z-10 mt-auto pt-1.5 border-t border-white/5">
+                    <span className="text-[6px] text-white/80 font-mono truncate max-w-[65px]" title={selectedVideoObj.title}>
+                      {selectedVideoObj.title}
+                    </span>
+                    <span className="text-[6px] text-white/90 font-mono">
+                      {selectedVideoObj.duration}
+                    </span>
+                  </div>
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-black/35 pointer-events-none"></div>
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* STEP 3 — SET SCHEDULE */}
+        <section className="bg-white/5 backdrop-blur-lg border border-white/10 p-5 rounded-3xl flex flex-col gap-4 shadow-xl">
+          <div className="flex items-center gap-2 pb-2 border-b border-white/10">
+            <span className="w-6 h-6 rounded-full bg-rose-500 text-white flex items-center justify-center text-xs font-bold font-mono">3</span>
+            <h3 className="font-bold text-sm uppercase tracking-wider text-white">Set Schedule</h3>
+          </div>
+
+          {!selectedVideoObj ? (
+            <div className="text-center py-6 bg-black/20 border border-white/5 rounded-xl">
+              <AlertTriangle className="w-7 h-7 text-amber-500 mx-auto mb-1.5" />
+              <p className="text-xs text-slate-400 font-medium">Please select a video from Step 1 first.</p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="flex flex-col">
+                  <label className="text-[10px] uppercase font-bold text-slate-400 mb-1 tracking-wider">Publish Date</label>
+                  <input
+                    type="date"
+                    value={ytPublishDate}
+                    onChange={(e) => setYtPublishDate(e.target.value)}
+                    className="bg-black/40 border border-white/15 focus:border-rose-500/50 rounded-xl px-3 py-2.5 text-xs text-white outline-none transition"
+                    required
+                  />
+                </div>
+
+                <div className="flex flex-col">
+                  <label className="text-[10px] uppercase font-bold text-slate-400 mb-1 tracking-wider">Publish Time</label>
+                  <input
+                    type="time"
+                    value={ytPublishTime}
+                    onChange={(e) => setYtPublishTime(e.target.value)}
+                    className="bg-black/40 border border-white/15 focus:border-rose-500/50 rounded-xl px-3 py-2.5 text-xs text-white outline-none transition"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 bg-blue-500/10 border border-blue-500/15 text-blue-300 text-xs rounded-xl flex items-center gap-2">
+                <Info className="w-4 h-4 text-blue-400 shrink-0" />
+                <span>Schedule is saved for planning. Automatic upload by time is not active yet.</span>
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* STEP 4 — ADD TO QUEUE */}
+        <section className="bg-white/5 backdrop-blur-lg border border-white/10 p-5 rounded-3xl flex flex-col gap-4 shadow-xl">
+          <div className="flex items-center gap-2 pb-2 border-b border-white/10">
+            <span className="w-6 h-6 rounded-full bg-rose-500 text-white flex items-center justify-center text-xs font-bold font-mono">4</span>
+            <h3 className="font-bold text-sm uppercase tracking-wider text-white">Add to Queue</h3>
+          </div>
+
+          {!selectedVideoObj ? (
+            <div className="text-center py-6 bg-black/20 border border-white/5 rounded-xl">
+              <AlertTriangle className="w-7 h-7 text-amber-500 mx-auto mb-1.5" />
+              <p className="text-xs text-slate-400 font-medium">Please select a video from Step 1 first.</p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              <button
+                type="button"
+                onClick={() => handleQueueSubmit()}
+                className="w-full bg-red-600 hover:bg-red-700 active:bg-red-800 text-white font-bold py-3 px-4 rounded-xl text-xs transition uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-red-900/15 cursor-pointer"
+              >
+                <PlusCircle className="w-4 h-4" />
+                <span>Add to Queue</span>
+              </button>
+
+              {showAddedMessage && (
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/15 text-emerald-300 text-xs rounded-xl flex items-center justify-center gap-2 animate-fadeIn font-semibold">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 animate-bounce" />
+                  <span>Added to queue.</span>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+
+        {/* STEP 5 — TODAY’S READY QUEUE */}
+        <section className="bg-white/5 backdrop-blur-lg border border-white/10 p-5 rounded-3xl flex flex-col gap-4 shadow-xl">
+          <div className="flex items-center justify-between pb-2 border-b border-white/10 flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-rose-500 text-white flex items-center justify-center text-xs font-bold font-mono">5</span>
+              <h3 className="font-bold text-sm uppercase tracking-wider text-white">Today’s Ready Queue</h3>
+            </div>
+            <span className="text-[10px] bg-white/5 border border-white/10 text-slate-300 px-2 py-0.5 rounded font-mono">
+              Date: {todayStr}
+            </span>
+          </div>
+
+          {queue.filter(q => q.publishDate === todayStr).length === 0 ? (
+            <div className="text-center py-8 bg-black/20 border border-white/5 rounded-xl">
+              <Calendar className="w-7 h-7 text-slate-600 mx-auto mb-1.5" />
+              <p className="text-xs text-slate-400 font-medium">No videos planned for today ({todayStr}).</p>
+              <p className="text-[10px] text-slate-500 mt-1">Set the publication date of draft videos to today to load them here.</p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3.5">
+              <div className="flex items-center justify-between flex-wrap gap-3 p-3 bg-white/[0.02] border border-white/5 rounded-xl">
+                <span className="text-xs text-slate-300 font-medium font-sans">
+                  Selected: <span className="text-rose-400 font-bold font-mono">{selectedQueueIds.filter(id => queue.some(q => q.id === id && q.publishDate === todayStr)).length}</span> / 3
+                </span>
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    disabled={selectedQueueIds.length === 0 || batchUploadActive}
+                    onClick={() => setSelectedQueueIds([])}
+                    className="px-2.5 py-1.5 text-[10px] text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg transition cursor-pointer disabled:opacity-40"
+                  >
+                    Clear Selection
+                  </button>
+                  <button
+                    type="button"
+                    disabled={batchUploadActive}
+                    onClick={() => {
+                      const todayReadyIds = queue
+                        .filter(q => q.publishDate === todayStr && getReadinessForItem(q.id)?.level === 'ready' && q.status !== 'Uploaded')
+                        .slice(0, 3)
+                        .map(q => q.id);
+                      setSelectedQueueIds(todayReadyIds);
+                      if (todayReadyIds.length === 0) {
+                        showNotification("No ready items scheduled for today found to auto-select.", "info");
+                      } else {
+                        showNotification(`Selected ${todayReadyIds.length} ready video(s) for today.`, "success");
+                      }
+                    }}
+                    className="px-2.5 py-1.5 text-[10px] text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15 rounded-lg transition cursor-pointer disabled:opacity-40"
+                  >
+                    Select Ready Today
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2.5 max-h-[300px] overflow-y-auto pr-1">
+                {queue.filter(q => q.publishDate === todayStr).map((item) => {
+                  const readiness = getReadinessForItem(item.id);
+                  const isChecked = selectedQueueIds.includes(item.id);
+                  const isUploaded = item.status === 'Uploaded';
+                  
+                  const readinessLabel = isUploaded 
+                    ? 'Already Uploaded'
+                    : readiness?.level === 'ready' 
+                      ? 'Ready to Upload' 
+                      : readiness?.level === 'warning' 
+                        ? 'Needs Review' 
+                        : 'Blocked';
+
+                  const readinessReason = [...(readiness?.issues || []), ...(readiness?.warnings || [])].join(', ') || 'No issues';
+
+                  let badgeColor = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/20';
+                  if (readiness?.level === 'blocked') badgeColor = 'bg-rose-500/20 text-rose-300 border-rose-500/20';
+                  else if (readiness?.level === 'warning') badgeColor = 'bg-amber-500/20 text-amber-300 border-amber-500/20';
+
+                  return (
+                    <div
+                      key={`wf-q-${item.id}`}
+                      className={`p-3 rounded-xl border flex items-center justify-between gap-3 transition-colors ${
+                        isChecked
+                          ? 'bg-white/10 border-rose-500/30'
+                          : 'bg-white/5 border-white/5 hover:border-white/10'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        {!isUploaded ? (
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => handleToggleSelect(item.id)}
+                            className="w-4 h-4 rounded border-white/25 text-rose-500 focus:ring-rose-500/20 focus:ring-offset-0 bg-black/20 cursor-pointer"
+                          />
+                        ) : (
+                          <div className="w-4 h-4 rounded bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-[10px]">
+                            ✓
+                          </div>
+                        )}
+
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-white truncate max-w-[200px] sm:max-w-xs md:max-w-md" title={item.youtubeTitle}>
+                            {item.youtubeTitle}
+                          </p>
+                          <span className="text-[10px] font-mono text-slate-400 block truncate" title={item.fileName}>
+                            📁 {item.fileName} • {item.publishTime}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        {readiness && (
+                          <span className={`text-[9px] border font-bold px-1.5 py-0.5 rounded ${badgeColor}`} title={readinessReason}>
+                            {readinessLabel}
+                          </span>
+                        )}
+                        {isUploaded ? (
+                          <span className="text-[9px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 font-bold px-2 py-0.5 rounded-full">
+                            Uploaded
+                          </span>
+                        ) : (
+                          <span className="text-[9px] bg-blue-500/20 text-blue-400 border border-blue-500/20 font-bold px-2 py-0.5 rounded-full">
+                            {item.status}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="pt-2 border-t border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <span className="text-[10px] text-slate-400 leading-normal font-sans">
+                  Up to 3 selected ready items will upload sequentially.
+                </span>
+                <button
+                  type="button"
+                  onClick={handleStartBatchUpload}
+                  disabled={selectedQueueIds.length === 0 || selectedQueueIds.length > 3 || batchUploadActive}
+                  className="px-4 py-2.5 bg-rose-500 hover:bg-rose-600 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-xs rounded-xl text-white transition flex items-center justify-center gap-1.5 cursor-pointer shadow-md"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Upload Selected</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
+      </div>
+    )}
+
+  </main>
 
       {/* FOOTER */}
       <footer className="mt-auto border-t border-white/10 bg-black/40 backdrop-blur-md py-6 px-4 text-center text-xs text-slate-500">
