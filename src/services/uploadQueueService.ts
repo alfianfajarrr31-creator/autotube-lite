@@ -114,6 +114,8 @@ export async function markQueueItemUploaded(
     youtube_video_id: string;
     youtube_video_url: string;
     uploaded_at: string;
+    youtube_publish_status?: 'uploaded' | 'scheduled' | null;
+    youtube_publish_at?: string | null;
   }
 ): Promise<UploadQueueItem> {
   if (!isSupabaseConfigured || !supabase) {
@@ -127,6 +129,8 @@ export async function markQueueItemUploaded(
       youtube_video_id: payload.youtube_video_id,
       youtube_video_url: payload.youtube_video_url,
       uploaded_at: payload.uploaded_at,
+      youtube_publish_status: payload.youtube_publish_status || 'uploaded',
+      youtube_publish_at: payload.youtube_publish_at || null,
       upload_error: null,
       updated_at: new Date().toISOString()
     })

@@ -1,4 +1,5 @@
 import { QueueItem, Video } from '../types';
+import { buildScheduledPublishAt } from '../services/youtubeUploadService';
 
 export type UploadReadinessLevel = 'ready' | 'warning' | 'blocked';
 
@@ -7,6 +8,7 @@ export interface UploadReadinessResult {
   level: UploadReadinessLevel;
   issues: string[];
   warnings: string[];
+  notes?: string[];
 }
 
 export interface UploadReadinessOptions {
@@ -95,6 +97,26 @@ export function checkUploadReadiness(
     warnings.push('Publish time is empty.');
   }
 
+  const notes: string[] = [];
+
+  if (queueItem.publishDate?.trim() && queueItem.publishTime?.trim()) {
+    const scheduledAt = buildScheduledPublishAt(queueItem.publishDate, queueItem.publishTime);
+    if (queueItem.visibility === 'Public' && scheduledAt) {
+      notes.push('This video will be scheduled on YouTube.');
+    } else {
+      // Check if past
+      try {
+        const localDateTimeStr = `${queueItem.publishDate}T${queueItem.publishTime}:00`;
+        const dateObj = new Date(localDateTimeStr);
+        if (!isNaN(dateObj.getTime()) && dateObj.getTime() <= Date.now()) {
+          warnings.push('Publish date/time is in the past. This will upload immediately.');
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+  }
+
   if (queueItem.youtubeTitle && queueItem.youtubeTitle.length > 100) {
     warnings.push('Title is longer than 100 characters.');
   }
@@ -103,12 +125,13 @@ export function checkUploadReadiness(
     warnings.push('Description is longer than 5000 characters.');
   }
 
-  const level: UploadReadinessLevel = issues.length > 0 ? 'blocked' : warnings.length > 0 ? 'warning' : 'ready';
+  const level: UploadReadinessLevel = issues.length > 0 ? 'blocked' : (warnings.length > 0 ? 'warning' : 'ready');
 
   return {
     isReady: issues.length === 0,
     level,
     issues,
     warnings,
+    notes,
   };
 }

@@ -76,17 +76,25 @@ AutoTube Lite uses:
 
 ### SQL Migration for extension
 
-Run this SQL statement in your Supabase SQL Editor to extend the `upload_queue` table safely if you haven't already:
+Run this SQL statement in your Supabase SQL Editor to extend the `upload_queue` table safely to support V1.1 Scheduled Publish:
 
 ```sql
 alter table upload_queue
 add column if not exists youtube_video_id text,
 add column if not exists youtube_video_url text,
 add column if not exists upload_error text,
-add column if not exists uploaded_at timestamptz;
+add column if not exists uploaded_at timestamptz,
+add column if not exists youtube_publish_status text,
+add column if not exists youtube_publish_at timestamptz;
 ```
 
-No new database tables are required for V1 Final Polish.
+## V1.1 Scheduled Publish Features
+
+AutoTube Lite V1.1 adds **YouTube Scheduled Publish** behavior using YouTube's native `publishAt` feature:
+- **Scheduled Publish**: When a video is uploaded with a future publish date/time target, it is automatically uploaded as Private first and scheduled with YouTube's `publishAt` parameter. YouTube then publishes it live automatically at your scheduled local timezone time.
+- **Dynamic Confirmation Prompts**: Shows customized confirmation dialogs notifying whether selected items will publish immediately or schedule.
+- **Visual Badge Distinction**: Provides clear blue-sky visual indicators ("Scheduled on YouTube") separate from local planned target dates ("Scheduled").
+- **Readiness Check Integration**: Dynamically alerts users in the readiness check panel whether a video is ready to schedule or if its publication schedule resides in the past.
 
 ## Development
 

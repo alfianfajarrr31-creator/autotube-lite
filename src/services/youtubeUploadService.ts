@@ -14,6 +14,36 @@ export interface YouTubeUploadInput {
 export interface YouTubeUploadResult {
   youtubeVideoId: string;
   youtubeVideoUrl: string;
+  youtubePublishStatus?: 'uploaded' | 'scheduled';
+  youtubePublishAt?: string | null;
+}
+
+/**
+ * Combines date and time into a local timezone ISO datetime string.
+ * Returns null if missing or not in the future.
+ */
+export function buildScheduledPublishAt(
+  publishDate?: string | null,
+  publishTime?: string | null
+): string | null {
+  if (!publishDate) return null;
+  const time = publishTime || '00:00';
+  try {
+    const localDateTimeStr = `${publishDate}T${time}:00`;
+    const dateObj = new Date(localDateTimeStr);
+    
+    if (isNaN(dateObj.getTime())) {
+      return null;
+    }
+
+    if (dateObj.getTime() <= Date.now()) {
+      return null;
+    }
+
+    return dateObj.toISOString();
+  } catch (e) {
+    return null;
+  }
 }
 
 /**
@@ -101,20 +131,35 @@ export async function downloadDriveFileAsBlob(driveFileId: string, accessToken: 
  * Uploads a video Blob to YouTube using the YouTube Data API v3 resumable upload protocol.
  */
 export async function uploadVideoToYouTube(input: YouTubeUploadInput): Promise<YouTubeUploadResult> {
-  const { accessToken, videoBlob, title, description, visibility } = input;
+  const { accessToken, videoBlob, title, description, visibility, publishDate, publishTime } = input;
 
   // 1. Stage 1: Initiate Resumable Upload Session
   const initUrl = 'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status';
   
+  let statusObj: any = {
+    privacyStatus: visibility.toLowerCase(), // 'private', 'unlisted', or 'public'
+  };
+
+  let computedPublishStatus: 'uploaded' | 'scheduled' = 'uploaded';
+  let computedPublishAt: string | null = null;
+
+  if (visibility === 'Public') {
+    const scheduledAt = buildScheduledPublishAt(publishDate, publishTime);
+    if (scheduledAt) {
+      statusObj.privacyStatus = 'private'; // must be private to schedule
+      statusObj.publishAt = scheduledAt;
+      computedPublishStatus = 'scheduled';
+      computedPublishAt = scheduledAt;
+    }
+  }
+
   const metadata = {
     snippet: {
       title: title,
       description: description,
       categoryId: "22", // People & Blogs
     },
-    status: {
-      privacyStatus: visibility.toLowerCase(), // 'private', 'unlisted', or 'public'
-    },
+    status: statusObj,
   };
 
   const initResponse = await fetch(initUrl, {
@@ -180,5 +225,7 @@ export async function uploadVideoToYouTube(input: YouTubeUploadInput): Promise<Y
   return {
     youtubeVideoId,
     youtubeVideoUrl,
+    youtubePublishStatus: computedPublishStatus,
+    youtubePublishAt: computedPublishAt,
   };
 }

@@ -62,6 +62,8 @@ export interface QueueItem {
   youtubeVideoUrl?: string | null;
   uploadError?: string | null;
   uploadedAt?: string | null;
+  youtubePublishStatus?: 'uploaded' | 'scheduled' | null;
+  youtubePublishAt?: string | null;
 }
 
 export interface UploadQueueItem {
@@ -84,6 +86,8 @@ export interface UploadQueueItem {
   youtube_video_url?: string | null;
   upload_error?: string | null;
   uploaded_at?: string | null;
+  youtube_publish_status?: 'uploaded' | 'scheduled' | null;
+  youtube_publish_at?: string | null;
 }
 
 export function mapToQueueItem(dbItem: UploadQueueItem): QueueItem {
@@ -105,6 +109,8 @@ export function mapToQueueItem(dbItem: UploadQueueItem): QueueItem {
     youtubeVideoUrl: dbItem.youtube_video_url,
     uploadError: dbItem.upload_error,
     uploadedAt: dbItem.uploaded_at,
+    youtubePublishStatus: dbItem.youtube_publish_status,
+    youtubePublishAt: dbItem.youtube_publish_at,
   };
 }
 
@@ -127,5 +133,7 @@ export function mapToDbItem(queueItem: QueueItem): Omit<UploadQueueItem, 'create
     youtube_video_url: queueItem.youtubeVideoUrl,
     upload_error: queueItem.uploadError,
     uploaded_at: queueItem.uploadedAt,
+    youtube_publish_status: queueItem.youtubePublishStatus,
+    youtube_publish_at: queueItem.youtubePublishAt,
   };
 }

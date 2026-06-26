@@ -85,7 +85,8 @@ import {
 import {
   requestYouTubeUploadToken,
   downloadDriveFileAsBlob,
-  uploadVideoToYouTube
+  uploadVideoToYouTube,
+  buildScheduledPublishAt
 } from './services/youtubeUploadService';
 
 export default function App() {
@@ -1220,7 +1221,7 @@ export default function App() {
   const handleStartBatchUpload = async () => {
     if (selectedQueueIds.length === 0) return;
     if (selectedQueueIds.length > 3) {
-      showNotification("V1 Complete allows up to 3 videos per batch for safety.", "error");
+      showNotification("V1.1 Scheduled Publish allows up to 3 videos per batch for safety.", "error");
       return;
     }
     if (!selectedYtChannel) {
@@ -1228,17 +1229,23 @@ export default function App() {
       return;
     }
 
-    const confirmBatch = window.confirm(
-      `Upload ${selectedQueueIds.length} selected video(s) to YouTube now? V1 Complete uploads manually and does not schedule yet.`
-    );
+    const itemsToUpload = queue.filter(q => selectedQueueIds.includes(q.id));
+    const hasScheduledItems = itemsToUpload.some(item => {
+      return item.visibility === 'Public' && !!buildScheduledPublishAt(item.publishDate, item.publishTime);
+    });
+
+    let confirmMsg = `Upload ${selectedQueueIds.length} selected video(s) to YouTube now?`;
+    if (hasScheduledItems) {
+      confirmMsg = `Upload ${selectedQueueIds.length} selected video(s) to YouTube? Some selected videos will be scheduled on YouTube based on their publish date/time.`;
+    }
+
+    const confirmBatch = window.confirm(confirmMsg);
     if (!confirmBatch) return;
 
     setBatchUploadActive(true);
     setBatchStatus('Running');
     setBatchTotalCount(selectedQueueIds.length);
     setBatchResults([]);
-
-    const itemsToUpload = queue.filter(q => selectedQueueIds.includes(q.id));
 
     for (let i = 0; i < itemsToUpload.length; i++) {
       const item = itemsToUpload[i];
@@ -1327,6 +1334,8 @@ export default function App() {
           title: item.youtubeTitle,
           description: `${item.description}\n\n${item.hashtags}`.trim(),
           visibility: item.visibility,
+          publishDate: item.publishDate,
+          publishTime: item.publishTime,
         });
 
         setUploadingStep(`Complete (${i + 1} of ${itemsToUpload.length})`);
@@ -1336,7 +1345,9 @@ export default function App() {
           await markQueueItemUploaded(item.id, {
             youtube_video_id: result.youtubeVideoId,
             youtube_video_url: result.youtubeVideoUrl,
-            uploaded_at: new Date().toISOString()
+            uploaded_at: new Date().toISOString(),
+            youtube_publish_status: result.youtubePublishStatus,
+            youtube_publish_at: result.youtubePublishAt,
           });
 
           if (matchedVideo && matchedVideo.source === 'drive') {
@@ -1354,6 +1365,8 @@ export default function App() {
               youtubeVideoId: result.youtubeVideoId,
               youtubeVideoUrl: result.youtubeVideoUrl,
               uploadedAt: new Date().toISOString(),
+              youtubePublishStatus: result.youtubePublishStatus,
+              youtubePublishAt: result.youtubePublishAt,
               uploadError: null
             };
           }
@@ -1422,13 +1435,19 @@ export default function App() {
     }
 
     const isRetry = item.status === 'Failed';
+    const scheduledAt = buildScheduledPublishAt(item.publishDate, item.publishTime);
 
     // 2. Ask for manual upload confirmation
-    const confirmUpload = window.confirm(
-      isRetry
-        ? `Retry uploading this failed video "${item.youtubeTitle}" to YouTube now?`
-        : `Upload this video "${item.youtubeTitle}" to YouTube now? V1 Complete uploads manually and does not schedule yet.`
-    );
+    let confirmUpload = false;
+    if (isRetry) {
+      confirmUpload = window.confirm(`Retry uploading this failed video "${item.youtubeTitle}" to YouTube now?`);
+    } else if (item.visibility === 'Public' && scheduledAt) {
+      confirmUpload = window.confirm(
+        "Upload this video to YouTube as scheduled publish? It will be uploaded as Private and YouTube will publish it automatically at the scheduled time."
+      );
+    } else {
+      confirmUpload = window.confirm(`Upload this video "${item.youtubeTitle}" to YouTube now?`);
+    }
     if (!confirmUpload) {
       return;
     }
@@ -1509,9 +1528,11 @@ export default function App() {
       setUploadingStep('Uploading to YouTube...');
       setUploadingPercent(75);
 
-      // Add a warning if there is a schedule saved
+      // Add a warning if there is a schedule saved in the past
       if (item.publishDate || item.publishTime) {
-        showNotification("Schedule date/time is saved but V1 Complete uploads manually now.", "info");
+        if (!scheduledAt && item.visibility === 'Public') {
+          showNotification("Publish date/time is in the past. This will upload immediately.", "info");
+        }
       }
 
       const result = await uploadVideoToYouTube({
@@ -1521,6 +1542,8 @@ export default function App() {
         title: item.youtubeTitle,
         description: `${item.description}\n\n${item.hashtags}`.trim(),
         visibility: item.visibility,
+        publishDate: item.publishDate,
+        publishTime: item.publishTime,
       });
 
       // 8. Handle successful upload
@@ -1533,7 +1556,9 @@ export default function App() {
           await markQueueItemUploaded(item.id, {
             youtube_video_id: result.youtubeVideoId,
             youtube_video_url: result.youtubeVideoUrl,
-            uploaded_at: new Date().toISOString()
+            uploaded_at: new Date().toISOString(),
+            youtube_publish_status: result.youtubePublishStatus,
+            youtube_publish_at: result.youtubePublishAt,
           });
 
           // Sync Drive video status if from Drive
@@ -1559,6 +1584,8 @@ export default function App() {
             youtubeVideoId: result.youtubeVideoId,
             youtubeVideoUrl: result.youtubeVideoUrl,
             uploadedAt: new Date().toISOString(),
+            youtubePublishStatus: result.youtubePublishStatus,
+            youtubePublishAt: result.youtubePublishAt,
             uploadError: null
           };
         }
@@ -1695,10 +1722,10 @@ export default function App() {
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-xl font-bold font-display tracking-tight text-white">AutoTube Lite</h1>
                 <span className="text-[10px] font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 px-1.5 py-0.5 rounded-md uppercase animate-pulse">
-                  V1 Complete
+                  V1.1 Scheduled Publish
                 </span>
                 <span className="text-[10px] font-sans font-medium text-slate-300 bg-white/5 border border-white/10 px-1.5 py-0.5 rounded-md">
-                  Manual upload workflow ready
+                  Scheduled publishing active
                 </span>
               </div>
               <p className="text-xs text-slate-400">Google Drive + YouTube Shorts Scheduler</p>
@@ -2893,10 +2920,22 @@ export default function App() {
                                 </div>
                               ) : item.status === 'Uploaded' ? (
                                 <div className="flex flex-col items-start md:items-end gap-1">
-                                  <span className="text-[9px] px-2 py-0.5 bg-green-500/20 text-green-400 border border-green-500/20 rounded uppercase font-bold flex items-center gap-1">
-                                    <CheckCircle className="w-3 h-3" />
-                                    Uploaded
-                                  </span>
+                                  {item.youtubePublishStatus === 'scheduled' ? (
+                                    <>
+                                      <span className="text-[9px] px-2 py-0.5 bg-sky-500/20 text-sky-400 border border-sky-500/20 rounded uppercase font-bold flex items-center gap-1">
+                                        <Clock className="w-3 h-3 animate-pulse" />
+                                        Scheduled on YouTube
+                                      </span>
+                                      <span className="text-[8px] text-sky-300/80 font-medium text-left md:text-right mt-0.5 max-w-[200px]">
+                                        YouTube will publish this video automatically at the scheduled time.
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <span className="text-[9px] px-2 py-0.5 bg-green-500/20 text-green-400 border border-green-500/20 rounded uppercase font-bold flex items-center gap-1">
+                                      <CheckCircle className="w-3 h-3" />
+                                      Uploaded
+                                    </span>
+                                  )}
                                 </div>
                               ) : item.status === 'Failed' ? (
                                 <div className="flex flex-col items-start md:items-end gap-1">
@@ -3068,7 +3107,15 @@ export default function App() {
                                     </ul>
                                   </div>
                                 )}
-                                {readiness.issues.length === 0 && readiness.warnings.length === 0 && (
+                                {readiness.notes && readiness.notes.length > 0 && (
+                                  <div className="mt-2">
+                                    <p className="text-sky-300 font-bold uppercase tracking-wider mb-1">Notes</p>
+                                    <ul className="list-disc list-inside space-y-0.5 text-sky-100/90">
+                                      {readiness.notes.map((note, index) => <li key={`note-${item.id}-${index}`}>{note}</li>)}
+                                    </ul>
+                                  </div>
+                                )}
+                                {readiness.issues.length === 0 && readiness.warnings.length === 0 && (!readiness.notes || readiness.notes.length === 0) && (
                                   <p className="text-emerald-200">No blocked issues or warnings found. This item is ready for the next upload ARC.</p>
                                 )}
                               </>
@@ -3209,10 +3256,17 @@ export default function App() {
 
                           <div className="shrink-0 flex items-center gap-1.5">
                             {isUploaded ? (
-                              <span className="text-[8px] font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded uppercase flex items-center gap-1">
-                                <CheckCircle className="w-2.5 h-2.5 text-emerald-400" />
-                                Uploaded
-                              </span>
+                              item.youtubePublishStatus === 'scheduled' ? (
+                                <span className="text-[8px] font-mono font-bold bg-sky-500/20 text-sky-400 border border-sky-500/20 px-2 py-0.5 rounded uppercase flex items-center gap-1">
+                                  <Clock className="w-2.5 h-2.5 text-sky-400 animate-pulse" />
+                                  Scheduled on YouTube
+                                </span>
+                              ) : (
+                                <span className="text-[8px] font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded uppercase flex items-center gap-1">
+                                  <CheckCircle className="w-2.5 h-2.5 text-emerald-400" />
+                                  Uploaded
+                                </span>
+                              )
                             ) : isFailed ? (
                               <span className="text-[8px] font-mono font-bold bg-red-500/20 text-red-400 border border-red-500/20 px-2 py-0.5 rounded uppercase flex items-center gap-1">
                                 <AlertTriangle className="w-2.5 h-2.5 text-red-400" />
@@ -3941,12 +3995,12 @@ export default function App() {
                                   {/* Status Badge */}
                                   <div className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase ${
                                     item.status === 'Uploaded'
-                                      ? 'bg-emerald-500/10 text-emerald-400'
+                                      ? (item.youtubePublishStatus === 'scheduled' ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20' : 'bg-emerald-500/10 text-emerald-400')
                                       : item.status === 'Failed'
                                         ? 'bg-rose-500/10 text-rose-400'
                                         : 'bg-yellow-500/10 text-yellow-500'
                                   }`}>
-                                    {item.status}
+                                    {item.status === 'Uploaded' && item.youtubePublishStatus === 'scheduled' ? 'Scheduled (YT)' : item.status}
                                   </div>
                                 </div>
                               </div>
@@ -3975,7 +4029,7 @@ export default function App() {
 
                                 {item.status === 'Uploaded' && item.youtubeVideoUrl && (
                                   <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/15 p-1.5 rounded-lg text-[9px] text-emerald-300 font-medium">
-                                    <span className="truncate">Uploaded live to YouTube!</span>
+                                    <span className="truncate">{item.youtubePublishStatus === 'scheduled' ? 'Scheduled on YouTube!' : 'Uploaded live to YouTube!'}</span>
                                     <a 
                                       href={item.youtubeVideoUrl} 
                                       target="_blank" 
@@ -4493,7 +4547,7 @@ export default function App() {
                   const isUploaded = item.status === 'Uploaded';
                   
                   const readinessLabel = isUploaded 
-                    ? 'Already Uploaded'
+                    ? (item.youtubePublishStatus === 'scheduled' ? 'Scheduled on YT' : 'Already Uploaded')
                     : readiness?.level === 'ready' 
                       ? 'Ready to Upload' 
                       : readiness?.level === 'warning' 
@@ -4505,6 +4559,7 @@ export default function App() {
                   let badgeColor = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/20';
                   if (readiness?.level === 'blocked') badgeColor = 'bg-rose-500/20 text-rose-300 border-rose-500/20';
                   else if (readiness?.level === 'warning') badgeColor = 'bg-amber-500/20 text-amber-300 border-amber-500/20';
+                  else if (isUploaded && item.youtubePublishStatus === 'scheduled') badgeColor = 'bg-sky-500/20 text-sky-300 border-sky-500/20';
 
                   return (
                     <div
@@ -4524,7 +4579,11 @@ export default function App() {
                             className="w-4 h-4 rounded border-white/25 text-rose-500 focus:ring-rose-500/20 focus:ring-offset-0 bg-black/20 cursor-pointer"
                           />
                         ) : (
-                          <div className="w-4 h-4 rounded bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-[10px]">
+                          <div className={`w-4 h-4 rounded flex items-center justify-center font-bold text-[10px] ${
+                            item.youtubePublishStatus === 'scheduled'
+                              ? 'bg-sky-500/20 border border-sky-500/30 text-sky-400'
+                              : 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-400'
+                          }`}>
                             ✓
                           </div>
                         )}
@@ -4546,8 +4605,12 @@ export default function App() {
                           </span>
                         )}
                         {isUploaded ? (
-                          <span className="text-[9px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 font-bold px-2 py-0.5 rounded-full">
-                            Uploaded
+                          <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${
+                            item.youtubePublishStatus === 'scheduled'
+                              ? 'bg-sky-500/20 text-sky-400 border-sky-500/20'
+                              : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/20'
+                          }`}>
+                            {item.youtubePublishStatus === 'scheduled' ? 'Scheduled' : 'Uploaded'}
                           </span>
                         ) : (
                           <span className="text-[9px] bg-blue-500/20 text-blue-400 border border-blue-500/20 font-bold px-2 py-0.5 rounded-full">
